@@ -57,8 +57,8 @@ static stmdev_ctx_t imu;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-static void IMU_Init(void);
-static void IMU_Stream(void);
+static void imu_init(void);
+static void imu_stream(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -70,7 +70,7 @@ static void IMU_Stream(void);
   *         the output ranges and data rates.
   * @retval None (traps in Error_Handler if the sensor does not respond)
   */
-static void IMU_Init(void)
+static void imu_init(void)
 {
   uint8_t whoami;
   uint8_t rst;
@@ -114,7 +114,7 @@ static void IMU_Init(void)
   *           t_ms,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps
   * @retval None
   */
-static void IMU_Stream(void)
+static void imu_stream(void)
 {
   uint8_t xl_ready = 0;
   uint8_t gy_ready = 0;
@@ -195,7 +195,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  IMU_Init();
+  imu_init();
 
   const char header[] = "t_ms,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps\n";
   HAL_UART_Transmit(&huart2, (uint8_t *)header, sizeof(header) - 1, HAL_MAX_DELAY);
@@ -208,7 +208,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    IMU_Stream();
+    imu_stream();
   }
   /* USER CODE END 3 */
 }
