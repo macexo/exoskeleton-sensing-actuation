@@ -232,8 +232,8 @@ characters, and use the body to explain *why* the change was made.
 - `test`: Test additions/updates
 - `chore`: Build process or auxiliary tool changes
 
-**Scopes**: the driver, project, or subsystem touched — for example `motors`, `imu`,
-`canbus`, `lsm6dso32`, `scripts`.
+**Scopes**: the driver, project, or subsystem touched — for example `motor`, `imu`,
+`can`, `pi`.
 
 **Examples**:
 
