@@ -1,0 +1,125 @@
+# ==============================================================================
+# Intentionally tracked — do not add these to this file:
+#   *.ioc         CubeMX hardware configuration
+#   .project      CubeIDE project definition
+#   .cproject     CubeIDE build configuration
+#   .mxproject    CubeMX generated-file manifest
+#   Drivers/      HAL and CMSIS sources (needed to build a fresh clone)
+#   *.ld          Linker scripts
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# STM32CubeIDE build output
+# ------------------------------------------------------------------------------
+Debug/
+Release/
+**/Debug/
+**/Release/
+
+# Firmware images and build byproducts
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.su
+*.cyclo
+*.stackdump
+
+# ------------------------------------------------------------------------------
+# Compiled objects and libraries (firmware + host-side driver tests)
+# ------------------------------------------------------------------------------
+*.o
+*.obj
+*.d
+*.a
+*.la
+*.lib
+*.lo
+*.slo
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.ilk
+*.pdb
+*.gch
+*.pch
+
+# ------------------------------------------------------------------------------
+# Host-side test builds (CMake)
+# ------------------------------------------------------------------------------
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+!Core/**/Makefile
+
+# ------------------------------------------------------------------------------
+# Eclipse / STM32CubeIDE workspace state (local to each developer)
+# ------------------------------------------------------------------------------
+.metadata/
+.settings/
+RemoteSystemsTempFiles/
+*.launch
+*.bak
+.recommenders/
+
+# ------------------------------------------------------------------------------
+# Python — host-side test and logging scripts
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ------------------------------------------------------------------------------
+# Editors
+# ------------------------------------------------------------------------------
+# Share workspace settings, keep personal state out
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ------------------------------------------------------------------------------
+# Test output — capture logs in the PR, not in the repo
+# ------------------------------------------------------------------------------
+logs/
+*.log
+
+# ------------------------------------------------------------------------------
+# OS cruft
+# ------------------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# ------------------------------------------------------------------------------
+# Secrets — never commit credentials, board serials, or calibration keys
+# ------------------------------------------------------------------------------
+.env
+.env.local
+*.pem
+*.key
+secrets.json
