@@ -20,15 +20,12 @@ joint, runs the control logic on an STM32, and commands the actuators over CAN.
 
 ## Repository Structure
 
-This repository follows the same three-folder layout as
-[`exoskeleton-embedded`](https://github.com/macexo/exoskeleton-embedded):
-
 ```text
 exoskeleton-sensing-actuation/
 ├── apis/                     # Reusable hardware APIs, one folder per domain
-│   └── <domain>/             # e.g. motor, sensor, can
-│       ├── Inc/              # Public headers
-│       ├── Src/              # Implementation
+│   └── <domain>/             # e.g. motor, imu, can
+│       ├── inc/              # Public headers
+│       ├── src/              # Implementation
 │       ├── docs/             # Supporting notes and diagrams
 │       ├── python/           # Host-side helpers for this API, where useful
 │       └── <domain>-api.md   # API reference
@@ -42,20 +39,6 @@ exoskeleton-sensing-actuation/
 ├── CONTRIBUTING.md           # Workflow, coding standards, safety rules
 └── README.md
 ```
-
-**Which folder does my code go in?**
-
-- **`apis/`** — code meant to be reused by more than one project: device drivers, bus
-  abstractions, buffers, frame packing. Unlike a strict driver folder, an API may depend
-  on the STM32 HAL and may carry whatever else it needs (docs, Python helpers).
-- **`src/`** — complete, working control loops that run on the exoskeleton. Code here is
-  expected to work end to end, and builds on `apis/`.
-- **`testing/`** — full standalone CubeIDE projects that exercise one thing: a sensor, an
-  API, a bring-up experiment. This is where new hardware gets proven before it graduates
-  into `src/`.
-
-Each API gets a `<domain>-api.md` reference; each project under `src/` and `testing/`
-gets a `README.md` explaining what it does, how to build it, and how to test it.
 
 ## Quick Start
 
@@ -82,21 +65,10 @@ Full setup, prerequisites, and troubleshooting are in
 
 | Project | Description | Status |
 | --- | --- | --- |
-| `apis/sensor` | LSM6DSO32 IMU API — STM32 HAL SPI and I2C ports over ST's platform-independent vendor driver | Migrating |
-| `apis/motor` | AK70-9 motor API — servo-mode and MIT command frame encoding, feedback and error-code parsing | Migrating |
-| `apis/can` | CAN bus abstraction the motor API sits on — extended/standard frame TX/RX, RX ring buffer | Planned |
-| `testing/stm32/imu-i2c` | LSM6DSO32 bring-up over I2C — `WHO_AM_I` check, 104 Hz ODR, polled data-ready, samples streamed over UART | Migrating |
-| `testing/stm32/imu-spi` | LSM6DSO32 bring-up over SPI2 in 4-wire mode — same configuration and polled data-ready as the I2C project | Migrating |
-
-Both IMU projects poll the data-ready status flags rather than using the INT1/INT2 pins;
-no interrupt line is currently routed to an EXTI. Moving to interrupt-driven sampling is
-the natural next step for a real control loop.
-
-`apis/motor` depends on `apis/can`: `ak70_9.c` builds frames and hands them to
-`can_send_ext()`. Bringing the motor API over means bringing the CAN abstraction with it.
-
-`src/` stays empty until something graduates out of `testing/` — a control loop belongs
-there only once it works end to end on hardware.
+| `apis/imu` | LSM6DSO32 IMU API — STM32 HAL SPI and I2C ports over ST's platform-independent vendor driver | Complete |
+| `apis/motor` | AK70-9 motor API — servo-mode and MIT impedance control with feedback parsing over CAN bus | Complete |
+| `testing/stm32/imu-i2c` | LSM6DSO32 bring-up over I2C — `WHO_AM_I` check, 104 Hz ODR, polled data-ready, samples streamed over UART | Planned (Emily) |
+| `testing/stm32/imu-spi` | LSM6DSO32 bring-up over SPI2 in 4-wire mode — same configuration and polled data-ready as the I2C project | Planned (Emily) |
 
 Update a row the moment its code lands here, and add a row before you start a new project so nobody
 duplicates your work.
