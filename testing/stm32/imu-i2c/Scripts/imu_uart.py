@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
-imu-uart.py
+imu_uart.py
 
-UART data streamer for STM32 LSM6DSO32 sensor measurements.
+Reads the LSM6DSO32 CSV stream off the Nucleo's ST-LINK virtual COM port.
 
-Line format from the MCU: <ms_since_start>,<ax_mg>,<ay_mg>,<az_mg>,<gx_mdps>,<gy_mdps>,<gz_mdps>
+The firmware prints a header line, then one row per sample at 104 Hz:
+    <ms_since_start>,<ax_mg>,<ay_mg>,<az_mg>,<gx_mdps>,<gy_mdps>,<gz_mdps>
 
-The MCU sends a CSV header line once at reset and then streams samples freely,
-so this script just reads until interrupted with Ctrl-C.
+Rows are printed as they arrive, and optionally appended to a CSV file.
+
+Usage:
+    python imu_uart.py --port COM5
+    python imu_uart.py --port /dev/ttyACM0 --out run.csv
 """
 
 import argparse
+import csv
 import serial
 from serial.tools import list_ports
 
@@ -19,12 +24,9 @@ from serial.tools import list_ports
 # ======================================================================
 
 TIMEOUT_S = 2
-
 MCU_HEADER = "t_ms,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps"
-
-COLUMNS = ("Time (s)", "ax (g)", "ay (g)", "az (g)",
-           "gx (dps)", "gy (dps)", "gz (dps)")
-COL_W = 11 # char width for each column
+COLUMNS = ("Time (s)", "ax (g)", "ay (g)", "az (g)","gx (dps)", "gy (dps)", "gz (dps)")
+COL_W = 11
 
 def print_header():
     """Print the column header and its rule."""
@@ -32,11 +34,11 @@ def print_header():
     print(rule)
     print(" ".join(f"{name:>{COL_W}}" for name in COLUMNS))
     print(rule)
+    
 
-
-def format_row(t_ms, ax, ay, az, gx, gy, gz):
-    """Format one raw sample as a right-aligned row in g and dps."""
-    values = (
+def scale_row(t_ms, ax, ay, az, gx, gy, gz):
+    """Convert one raw sample to the units in COLUMNS: s, g, and dps."""
+    return (
         t_ms / 1000.0,  # ms -> s
         ax / 1000.0,    # mg -> g
         ay / 1000.0,
@@ -45,6 +47,10 @@ def format_row(t_ms, ax, ay, az, gx, gy, gz):
         gy / 1000.0,
         gz / 1000.0,
     )
+
+
+def format_row(values):
+    """Format one scaled sample as a right-aligned row."""
     return " ".join(f"{v:>{COL_W}.3f}" for v in values)
 
 
@@ -55,6 +61,7 @@ def main():
     parser.add_argument("-p", "--port", help="serial port, e.g. COM3 or /dev/ttyUSB0")
     parser.add_argument("-b", "--baud", type=int, default=115200,
                         help="must match huart2.Init.BaudRate in Core/Src/usart.c")
+    parser.add_argument("--out", help="append samples to this CSV file as well")
 
     args = parser.parse_args()
 
@@ -75,7 +82,17 @@ def main():
 
     ser = serial.Serial(args.port, args.baud, timeout=TIMEOUT_S)
 
-    print(f"Reading from {args.port} at {args.baud} baud. Ctrl-C to stop.\n")
+    out_file = open(args.out, "a", newline="") if args.out else None
+    writer = None
+    if out_file is not None:
+        writer = csv.writer(out_file)
+        if out_file.tell() == 0:
+            writer.writerow(COLUMNS)
+
+    print(f"Reading from {args.port} at {args.baud} baud. Ctrl-C to stop.")
+    if args.out:
+        print(f"Logging to {args.out}.")
+    print()
     print_header()
 
     try:
@@ -94,12 +111,18 @@ def main():
             except ValueError:
                 continue    # malformed line
 
-            print(format_row(t_ms, ax, ay, az, gx, gy, gz))
+            values = scale_row(t_ms, ax, ay, az, gx, gy, gz)
+            print(format_row(values))
+
+            if writer is not None:
+                writer.writerow(f"{v:.3f}" for v in values)
 
     except KeyboardInterrupt:
         pass
     finally:
         ser.close()
+        if out_file is not None:
+            out_file.close()
 
 
 if __name__=="__main__":
