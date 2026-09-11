@@ -37,9 +37,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define IMU_BOOT_TIME_MS 35      // Turn-on time
-#define TX_BUF_SIZE      96      // Enough for one CSV line
-#define LED_BLINK_DIV    52      // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
+#define IMU_BOOT_TIME_MS     35  // Turn-on time
+#define TX_BUF_SIZE          96  // Enough for one CSV line
+#define LED_BLINK_DIV        52  // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
 #define IMU_RESET_TIMEOUT_MS 100 // Ceiling on the software-reset flag poll
 
 /* Set to 1, jumper PB5 (MOSI) to PB4 (MISO), and unplug the sensor to test
@@ -63,7 +63,6 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* Must outlive the ctx: lsm6dso32_spi_ctx() keeps a pointer to it. */
 static lsm6dso32_spi_bus_t imu_bus = { &hspi3, IMU_CS_GPIO_Port, IMU_CS_Pin };
 static stmdev_ctx_t imu;
 /* USER CODE END PV */
@@ -80,11 +79,9 @@ static void imu_stream(void);
 
 #if IMU_SPI_LOOPBACK_TEST
 /**
-  * @brief  Bus self-test with the sensor out of the picture. Wire PB5 to PB4
-  *         so the peripheral hears its own output: every byte sent must come
-  *         back identical. Passing clears the SPI peripheral, the AF mapping,
-  *         SCK, MOSI and MISO in one shot and puts the fault on the breakout
-  *         or its wiring. Failing puts it on the STM32 side.
+  * @brief  Bus self-test with the sensor out of the picture: wire PB5 to PB4
+  *         and every byte sent must come back identical. Passing puts the
+  *         fault on the breakout or its wiring, failing on the STM32 side.
   * @retval None
   */
 static void spi_loopback_test(void)
@@ -113,13 +110,11 @@ static void spi_loopback_test(void)
 
 #if IMU_SPI_PIN_PROBE
 /**
-  * @brief  Read PB4 as a plain input, once with the internal pull-up and once
-  *         with the pull-down. A wire with nothing on the far end just follows
-  *         whichever pull is applied. A wire that really reaches the powered
-  *         breakout is held at one level by the board network and ignores the
-  *         much weaker internal pull. That separates "DO is not connected"
-  *         from "DO is connected but the sensor never drives it" -- two faults
-  *         indistinguishable at the SPI layer, since both read back 0xFF.
+  * @brief  Read PB4 as an input under the internal pull-up and then the
+  *         pull-down. An open wire follows the pull; one reaching the powered
+  *         breakout is held by the board network. Separates "DO is not
+  *         connected" from "DO is connected but never driven" -- both read
+  *         back 0xFF at the SPI layer.
   * @retval Pin level with that pull applied
   */
 static uint8_t probe_miso(uint32_t pull)
@@ -184,10 +179,9 @@ static void spi_pin_probe(void)
 
 #if IMU_SPI_SCOPE_LOOP
 /**
-  * @brief  Issue the same WHO_AM_I read over and over so the bus carries a
-  *         stable, repeating waveform. Trigger the scope on the CS falling
-  *         edge and each line can be checked against what it should carry.
-  *         Prints the byte once a second so the terminal stays informative.
+  * @brief  Repeat the same WHO_AM_I read so the bus carries a stable, scope-
+  *         triggerable waveform on the CS falling edge. Prints the byte once
+  *         a second.
   * @retval Never returns
   */
 static void spi_scope_loop(void)
@@ -299,13 +293,9 @@ static void imu_stream(void)
   lsm6dso32_xl_flag_data_ready_get(&imu, &xl_ready);
   lsm6dso32_gy_flag_data_ready_get(&imu, &gy_ready);
 
-  /* Both run at the same ODR, so wait until the pair is ready and emit one
-     row per sample instead of a half-updated line */
   if (!xl_ready || !gy_ready)
     return;
 
-  /* Reading the output registers is what clears the data-ready flags and
-     releases the BDU hold for the next sample */
   lsm6dso32_acceleration_raw_get(&imu, raw_xl);
   lsm6dso32_angular_rate_raw_get(&imu, raw_gy);
 

@@ -134,13 +134,9 @@ static void imu_stream(void)
   lsm6dso32_xl_flag_data_ready_get(&imu, &xl_ready);
   lsm6dso32_gy_flag_data_ready_get(&imu, &gy_ready);
 
-  /* Both run at the same ODR, so wait until the pair is ready and emit one
-     row per sample instead of a half-updated line */
   if (!xl_ready || !gy_ready)
     return;
 
-  /* Reading the output registers is what clears the data-ready flags and
-     releases the BDU hold for the next sample */
   lsm6dso32_acceleration_raw_get(&imu, raw_xl);
   lsm6dso32_angular_rate_raw_get(&imu, raw_gy);
 
