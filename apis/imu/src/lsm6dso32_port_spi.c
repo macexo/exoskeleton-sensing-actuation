@@ -61,6 +61,8 @@ stmdev_ctx_t lsm6dso32_spi_ctx(lsm6dso32_spi_bus_t *bus)
 {
   HAL_GPIO_WritePin(bus->cs_port, bus->cs_pin, GPIO_PIN_SET); // CS idles high
 
+  __HAL_SPI_ENABLE(bus->hspi);
+
   stmdev_ctx_t ctx = {
     .write_reg = lsm6dso32_spi_write,
     .read_reg  = lsm6dso32_spi_read,
