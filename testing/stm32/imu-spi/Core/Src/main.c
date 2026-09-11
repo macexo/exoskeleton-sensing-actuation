@@ -27,6 +27,7 @@
 #include "lsm6dso32_reg.h"
 #include "lsm6dso32_port.h"
 #include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,10 +37,22 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define IMU_BOOT_TIME_MS     35  // Turn-on time
-#define TX_BUF_SIZE          96  // Enough for one CSV line
-#define LED_BLINK_DIV        52  // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
+#define IMU_BOOT_TIME_MS 35      // Turn-on time
+#define TX_BUF_SIZE      96      // Enough for one CSV line
+#define LED_BLINK_DIV    52      // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
 #define IMU_RESET_TIMEOUT_MS 100 // Ceiling on the software-reset flag poll
+
+/* Set to 1, jumper PB5 (MOSI) to PB4 (MISO), and unplug the sensor to test
+   the STM32 side of the bus on its own. Set back to 0 for normal operation. */
+#define IMU_SPI_LOOPBACK_TEST 0
+
+/* Set to 1 with the sensor wired up as normal. Reports what is on the far
+   end of the MISO wire, then pulses CS so it can be caught on a meter. */
+#define IMU_SPI_PIN_PROBE 0
+
+/* Set to 1 to read WHO_AM_I forever at ~200 Hz, so a scope has a repeating
+   transaction to trigger on. Never returns. Set back to 0 to run normally. */
+#define IMU_SPI_SCOPE_LOOP 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,6 +63,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+/* Must outlive the ctx: lsm6dso32_spi_ctx() keeps a pointer to it. */
 static lsm6dso32_spi_bus_t imu_bus = { &hspi3, IMU_CS_GPIO_Port, IMU_CS_Pin };
 static stmdev_ctx_t imu;
 /* USER CODE END PV */
@@ -63,6 +77,144 @@ static void imu_stream(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+#if IMU_SPI_LOOPBACK_TEST
+/**
+  * @brief  Bus self-test with the sensor out of the picture. Wire PB5 to PB4
+  *         so the peripheral hears its own output: every byte sent must come
+  *         back identical. Passing clears the SPI peripheral, the AF mapping,
+  *         SCK, MOSI and MISO in one shot and puts the fault on the breakout
+  *         or its wiring. Failing puts it on the STM32 side.
+  * @retval None
+  */
+static void spi_loopback_test(void)
+{
+  /* Mixed and alternating bits to catch a stuck clock */
+  static const uint8_t tx[] = { 0x6C, 0xA5, 0x5A, 0x00, 0xFF };
+  uint8_t rx[sizeof(tx)] = { 0 };
+  char line[TX_BUF_SIZE];
+
+  /* CS stays high: nothing is listening, this only exercises the pins */
+  HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(&hspi3, (uint8_t *)tx, rx,
+                                                 sizeof(tx), 100);
+
+  int n = snprintf(line, sizeof(line),
+                   "loopback hal=%d sent %02X %02X %02X %02X %02X got %02X %02X %02X %02X %02X\r\n",
+                   (int)st, tx[0], tx[1], tx[2], tx[3], tx[4],
+                   rx[0], rx[1], rx[2], rx[3], rx[4]);
+  HAL_UART_Transmit(&huart2, (uint8_t *)line, n, HAL_MAX_DELAY);
+
+  const char *verdict = (memcmp(tx, rx, sizeof(tx)) == 0)
+                        ? "loopback PASS: STM32 side is good, fault is the breakout or wiring\r\n"
+                        : "loopback FAIL: fault is on the STM32 side, sensor is not involved\r\n";
+  HAL_UART_Transmit(&huart2, (uint8_t *)verdict, strlen(verdict), HAL_MAX_DELAY);
+}
+#endif
+
+#if IMU_SPI_PIN_PROBE
+/**
+  * @brief  Read PB4 as a plain input, once with the internal pull-up and once
+  *         with the pull-down. A wire with nothing on the far end just follows
+  *         whichever pull is applied. A wire that really reaches the powered
+  *         breakout is held at one level by the board network and ignores the
+  *         much weaker internal pull. That separates "DO is not connected"
+  *         from "DO is connected but the sensor never drives it" -- two faults
+  *         indistinguishable at the SPI layer, since both read back 0xFF.
+  * @retval Pin level with that pull applied
+  */
+static uint8_t probe_miso(uint32_t pull)
+{
+  GPIO_InitTypeDef g = {0};
+
+  g.Pin   = GPIO_PIN_4;
+  g.Mode  = GPIO_MODE_INPUT;
+  g.Pull  = pull;
+  g.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &g);
+
+  HAL_Delay(2);
+
+  return HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4);
+}
+
+static void spi_pin_probe(void)
+{
+  uint8_t pu = probe_miso(GPIO_PULLUP);
+  uint8_t pd = probe_miso(GPIO_PULLDOWN);
+
+  /* Hand PB4 back to SPI3 before anything tries a transfer */
+  GPIO_InitTypeDef g = {0};
+
+  g.Pin       = GPIO_PIN_4;
+  g.Mode      = GPIO_MODE_AF_PP;
+  g.Pull      = GPIO_NOPULL;
+  g.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+  g.Alternate = GPIO_AF6_SPI3;
+  HAL_GPIO_Init(GPIOB, &g);
+
+  const char *verdict;
+
+  if (pu && !pd)
+    verdict = "  -> DO wire is open, or the breakout has no power\r\n";
+  else if (pu && pd)
+    verdict = "  -> DO is connected and held high; sensor is not driving\r\n";
+  else if (!pu && !pd)
+    verdict = "  -> DO is connected and clamped low\r\n";
+  else
+    verdict = "  -> inverted, which should not happen; suspect a short\r\n";
+
+  char line[TX_BUF_SIZE];
+  int  n = snprintf(line, sizeof(line), "MISO probe: pullup=%u pulldown=%u\r\n",
+                    (unsigned)pu, (unsigned)pd);
+  HAL_UART_Transmit(&huart2, (uint8_t *)line, n, HAL_MAX_DELAY);
+  HAL_UART_Transmit(&huart2, (uint8_t *)verdict, strlen(verdict), HAL_MAX_DELAY);
+
+  /* Slow enough to catch on a multimeter: PB6 should swing rail to rail */
+  const char msg[] = "Pulsing CS on PB6 for 10 s, measure it against GND\r\n";
+  HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg) - 1, HAL_MAX_DELAY);
+
+  for (int i = 0; i < 10; i++) {
+    HAL_GPIO_WritePin(IMU_CS_GPIO_Port, IMU_CS_Pin, GPIO_PIN_RESET);
+    HAL_Delay(500);
+    HAL_GPIO_WritePin(IMU_CS_GPIO_Port, IMU_CS_Pin, GPIO_PIN_SET);
+    HAL_Delay(500);
+  }
+}
+#endif
+
+#if IMU_SPI_SCOPE_LOOP
+/**
+  * @brief  Issue the same WHO_AM_I read over and over so the bus carries a
+  *         stable, repeating waveform. Trigger the scope on the CS falling
+  *         edge and each line can be checked against what it should carry.
+  *         Prints the byte once a second so the terminal stays informative.
+  * @retval Never returns
+  */
+static void spi_scope_loop(void)
+{
+  imu = lsm6dso32_spi_ctx(&imu_bus);
+
+  const char msg[] = "Scope loop: WHO_AM_I every 5 ms, trigger on CS falling\r\n";
+  HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg) - 1, HAL_MAX_DELAY);
+
+  uint32_t last_report = HAL_GetTick();
+  uint8_t  whoami = 0;
+
+  for (;;) {
+    lsm6dso32_device_id_get(&imu, &whoami);
+
+    if (HAL_GetTick() - last_report >= 1000) {
+      last_report = HAL_GetTick();
+
+      char line[TX_BUF_SIZE];
+      int  n = snprintf(line, sizeof(line), "  WHO_AM_I = 0x%02X\r\n", whoami);
+      HAL_UART_Transmit(&huart2, (uint8_t *)line, n, HAL_MAX_DELAY);
+    }
+
+    HAL_Delay(5);
+  }
+}
+#endif
 
 /**
   * @brief  Brings the LSM6DSO32 up on SPI3: confirms the sensor is responsive,
@@ -215,6 +367,15 @@ int main(void)
   MX_USART2_UART_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
+#if IMU_SPI_SCOPE_LOOP
+  spi_scope_loop();
+#endif
+#if IMU_SPI_PIN_PROBE
+  spi_pin_probe();
+#endif
+#if IMU_SPI_LOOPBACK_TEST
+  spi_loopback_test();
+#endif
   imu_init();
 
   const char header[] = "t_ms,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps\n";
@@ -228,7 +389,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    imu_stream();
+	  imu_stream();
   }
   /* USER CODE END 3 */
 }
