@@ -36,9 +36,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define IMU_BOOT_TIME_MS 35  // Datasheet turn-on time
-#define TX_BUF_SIZE      96  // Enough for one CSV line
-#define LED_BLINK_DIV    52  // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
+#define IMU_BOOT_TIME_MS     35  // Turn-on time
+#define TX_BUF_SIZE          96  // Enough for one CSV line
+#define LED_BLINK_DIV        52  // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
+#define IMU_RESET_TIMEOUT_MS 100 // Ceiling on the software-reset flag poll
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,7 +50,6 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* Must outlive the ctx: lsm6dso32_spi_ctx() keeps a pointer to it. */
 static lsm6dso32_spi_bus_t imu_bus = { &hspi3, IMU_CS_GPIO_Port, IMU_CS_Pin };
 static stmdev_ctx_t imu;
 /* USER CODE END PV */
@@ -87,8 +87,16 @@ static void imu_init(void)
 
   /* Software reset, then wait for sensor to clear the flag */
   lsm6dso32_reset_set(&imu, PROPERTY_ENABLE);
+
+  uint32_t reset_start = HAL_GetTick();
+
   do {
-    lsm6dso32_reset_get(&imu, &rst);
+    if (lsm6dso32_reset_get(&imu, &rst) != 0 ||
+        HAL_GetTick() - reset_start > IMU_RESET_TIMEOUT_MS) {
+      const char err[] = "IMU software reset did not complete\r\n";
+      HAL_UART_Transmit(&huart2, (uint8_t *)err, sizeof(err) - 1, HAL_MAX_DELAY);
+      Error_Handler();
+    }
   } while (rst);
 
   /* Disable I2C and set the 4-wire mode for SPI */

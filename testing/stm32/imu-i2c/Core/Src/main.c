@@ -36,9 +36,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define IMU_BOOT_TIME_MS 35  // Datasheet turn-on time
-#define TX_BUF_SIZE      96  // Enough for one CSV line
-#define LED_BLINK_DIV    52  // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
+#define IMU_BOOT_TIME_MS     35  // Turn-on time
+#define TX_BUF_SIZE          96  // Enough for one CSV line
+#define LED_BLINK_DIV        52  // Samples per LD2 toggle (~1 Hz blink at 104 Hz ODR)
+#define IMU_RESET_TIMEOUT_MS 100 // Ceiling on the software-reset flag poll
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -49,7 +51,6 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* Must outlive the ctx: lsm6dso32_i2c_ctx() keeps a pointer to it. */
 static lsm6dso32_i2c_bus_t imu_bus = { &hi2c1, LSM6DSO32_I2C_ADD_L };
 static stmdev_ctx_t imu;
 /* USER CODE END PV */
@@ -57,8 +58,8 @@ static stmdev_ctx_t imu;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-static void IMU_Init(void);
-static void IMU_Stream(void);
+static void imu_init(void);
+static void imu_stream(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -70,7 +71,7 @@ static void IMU_Stream(void);
   *         the output ranges and data rates.
   * @retval None (traps in Error_Handler if the sensor does not respond)
   */
-static void IMU_Init(void)
+static void imu_init(void)
 {
   uint8_t whoami;
   uint8_t rst;
@@ -86,8 +87,16 @@ static void IMU_Init(void)
 
   /* Software reset, then wait for sensor to clear the flag */
   lsm6dso32_reset_set(&imu, PROPERTY_ENABLE);
+
+  uint32_t reset_start = HAL_GetTick();
+
   do {
-    lsm6dso32_reset_get(&imu, &rst);
+    if (lsm6dso32_reset_get(&imu, &rst) != 0 ||
+        HAL_GetTick() - reset_start > IMU_RESET_TIMEOUT_MS) {
+      const char err[] = "IMU software reset did not complete\r\n";
+      HAL_UART_Transmit(&huart2, (uint8_t *)err, sizeof(err) - 1, HAL_MAX_DELAY);
+      Error_Handler();
+    }
   } while (rst);
 
   /* Keep the I2C interface live */
@@ -114,7 +123,7 @@ static void IMU_Init(void)
   *           t_ms,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps
   * @retval None
   */
-static void IMU_Stream(void)
+static void imu_stream(void)
 {
   uint8_t xl_ready = 0;
   uint8_t gy_ready = 0;
@@ -149,10 +158,8 @@ static void IMU_Stream(void)
 
   HAL_UART_Transmit(&huart2, (uint8_t *)line, len, HAL_MAX_DELAY);
 
-  /* Heartbeat on LD2, divided down to a visible rate. Toggling once per sample
-     would run at 52 Hz and just look like a dim steady glow, which is
-     indistinguishable from a pin stuck high. Blinking means samples are still
-     going out; solid or dark means the stream stopped */
+  /* Heartbeat on LD2, divided down to a visible rate. 
+     Blinking means samples are still going out; solid or dark means the stream stopped */
   static uint16_t led_div;
 
   if (++led_div >= LED_BLINK_DIV) {
@@ -195,7 +202,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  IMU_Init();
+  imu_init();
 
   const char header[] = "t_ms,ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps\n";
   HAL_UART_Transmit(&huart2, (uint8_t *)header, sizeof(header) - 1, HAL_MAX_DELAY);
@@ -208,7 +215,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    IMU_Stream();
+    imu_stream();
   }
   /* USER CODE END 3 */
 }
