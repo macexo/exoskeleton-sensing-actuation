@@ -81,9 +81,21 @@ static void imu_init(void)
   /* Allow sensor turn-on time before the first transaction */
   HAL_Delay(IMU_BOOT_TIME_MS);
 
-  /* Catch absent or wrong sensor ID */
-  if (lsm6dso32_device_id_get(&imu, &whoami) != 0 || whoami != LSM6DSO32_ID)
+  /* Catch absent or wrong sensor ID:
+       0x00        MISO stuck low: line not connected, or sensor not driving it
+       0xFF        MISO floating high: CS never reaching the sensor, or no power
+       0x6C        shifted (0xD8 / 0x36): a stray clock edge, check CPOL/CPHA
+       other       wrong part, or the bus is picking up a different device */
+  int32_t id_status = lsm6dso32_device_id_get(&imu, &whoami);
+
+  if (id_status != 0 || whoami != LSM6DSO32_ID) {
+    char msg[TX_BUF_SIZE];
+    int  n = snprintf(msg, sizeof(msg),
+                      "IMU WHO_AM_I: got 0x%02X, want 0x%02X (bus status %ld)\r\n",
+                      whoami, LSM6DSO32_ID, (long)id_status);
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg, n, HAL_MAX_DELAY);
     Error_Handler();
+  }
 
   /* Software reset, then wait for sensor to clear the flag */
   lsm6dso32_reset_set(&imu, PROPERTY_ENABLE);
