@@ -64,13 +64,12 @@ If any of these fail, ask in the team Discord channel before continuing.
 
 ## Repository Structure
 
-The layout is documented in the [README](README.md#repository-structure) and matches
-`exoskeleton-embedded`: reusable hardware APIs under `apis/<domain>/`, working control
+The layout is documented in the [README](README.md#repository-structure): reusable hardware APIs under `apis/<domain>/`, working control
 loops under `src/`, and standalone bring-up projects under `testing/`.
 
 Put new code in the right one:
 
-- Writing something two projects will use? `apis/<domain>/`, split `Inc/` and `Src/`.
+- Writing something multiple projects will use? `apis/<domain>/`, split `Inc/` and `Src/`.
 - Proving out a new sensor, motor, or API on the bench? `testing/stm32/<project>/`.
 - Promoting a proven bring-up into a real control loop? `src/stm32/<project>/`.
 
@@ -80,9 +79,6 @@ Three things are expected of anything you add:
   what it does, how to build it, and how to test it.
 - **Add it to the project table** in the [README](README.md#projects) — add the row when
   you start, so nobody duplicates your work, and update the status when it lands.
-- **Don't duplicate an API into a project.** If you need to change a shared API to make
-  your project work, change it in `apis/` and say so in the PR, rather than copying the
-  files in and editing the copy.
 
 ## Development Workflow
 
@@ -232,8 +228,8 @@ characters, and use the body to explain *why* the change was made.
 - `test`: Test additions/updates
 - `chore`: Build process or auxiliary tool changes
 
-**Scopes**: the driver, project, or subsystem touched — for example `motor`, `imu`,
-`can`, `pi`.
+**Scopes**: the driver, project, or subsystem touched — for example `motors`, `imu`,
+`canbus`, `lsm6dso32`, `scripts`.
 
 **Examples**:
 

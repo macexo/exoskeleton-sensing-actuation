@@ -149,10 +149,8 @@ static void imu_stream(void)
 
   HAL_UART_Transmit(&huart2, (uint8_t *)line, len, HAL_MAX_DELAY);
 
-  /* Heartbeat on LD2, divided down to a visible rate. Toggling once per sample
-     would run at 52 Hz and just look like a dim steady glow, which is
-     indistinguishable from a pin stuck high. Blinking means samples are still
-     going out; solid or dark means the stream stopped */
+  /* Heartbeat on LD2, divided down to a visible rate. 
+     Blinking means samples are still going out; solid or dark means the stream stopped */
   static uint16_t led_div;
 
   if (++led_div >= LED_BLINK_DIV) {

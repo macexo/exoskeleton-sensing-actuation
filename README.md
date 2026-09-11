@@ -67,8 +67,8 @@ Full setup, prerequisites, and troubleshooting are in
 | --- | --- | --- |
 | `apis/imu` | LSM6DSO32 IMU API — STM32 HAL SPI and I2C ports over ST's platform-independent vendor driver | Complete |
 | `apis/motor` | AK70-9 motor API — servo-mode and MIT impedance control with feedback parsing over CAN bus | Complete |
-| `testing/stm32/imu-i2c` | LSM6DSO32 bring-up over I2C — `WHO_AM_I` check, 104 Hz ODR, polled data-ready, samples streamed over UART | Planned (Emily) |
-| `testing/stm32/imu-spi` | LSM6DSO32 bring-up over SPI2 in 4-wire mode — same configuration and polled data-ready as the I2C project | Planned (Emily) |
+| `testing/stm32/imu-i2c` | LSM6DSO32 bring-up over I2C — `WHO_AM_I` check, 104 Hz ODR, polled data-ready, samples streamed over UART | Complete |
+| `testing/stm32/imu-spi` | LSM6DSO32 bring-up over SPI2 in 4-wire mode — same configuration and polled data-ready as the I2C project | In Progress |
 
 Update a row the moment its code lands here, and add a row before you start a new project so nobody
 duplicates your work.
