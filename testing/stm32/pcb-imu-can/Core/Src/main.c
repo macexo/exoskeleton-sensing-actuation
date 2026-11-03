@@ -1,160 +1,114 @@
-/* SPI IMU telemetry over classic CAN; based on pcb-test-can and pcb-test-imu. */
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "can.h"
-#include "gpio.h"
 #include "spi.h"
-#include "lsm6dso32_port.h"
+#include "gpio.h"
 
-/* Two standard-ID frames per sample. Change both IDs for each additional board. */
-#define IMU_ACCEL_CAN_ID 0x065U
-#define IMU_GYRO_CAN_ID  0x066U
-#define CAN_TX_TIMEOUT_MS 3U
-#define IMU_RESET_TIMEOUT_MS 100U
-#define IMU_STALE_TIMEOUT_MS 100U
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
 
-static lsm6dso32_spi_bus_t imu_bus = { &hspi3, IMU_CS_GPIO_Port, IMU_CS_Pin };
-static stmdev_ctx_t imu;
+/* USER CODE END Includes */
 
-/* Inspect these in the debugger. CAN ESR includes LEC, TEC, REC and bus-off. */
-volatile uint32_t imu_samples;
-volatile uint32_t imu_read_errors;
-volatile uint32_t can_pairs_sent;
-volatile uint32_t can_pairs_dropped;
-volatile uint32_t can_last_esr;
-volatile uint32_t can_last_tsr;
-volatile uint8_t imu_whoami;
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
 
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+
+/* USER CODE BEGIN PV */
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+/* USER CODE BEGIN PFP */
 
-static void imu_init(void)
-{
-  uint8_t id = 0;
-  uint8_t reset = 1;
-  imu = lsm6dso32_spi_ctx(&imu_bus);
-  HAL_Delay(35);
-  if (lsm6dso32_device_id_get(&imu, &id) != 0) Error_Handler();
-  imu_whoami = id;
-  if (id != LSM6DSO32_ID) Error_Handler();
-  if (lsm6dso32_reset_set(&imu, PROPERTY_ENABLE) != 0) Error_Handler();
-  uint32_t start = HAL_GetTick();
-  do {
-    if (lsm6dso32_reset_get(&imu, &reset) != 0 ||
-        HAL_GetTick() - start >= IMU_RESET_TIMEOUT_MS) Error_Handler();
-  } while (reset);
-  if (lsm6dso32_i2c_interface_set(&imu, LSM6DSO32_I2C_DISABLE) != 0 ||
-      lsm6dso32_spi_mode_set(&imu, LSM6DSO32_SPI_4_WIRE) != 0 ||
-      lsm6dso32_auto_increment_set(&imu, PROPERTY_ENABLE) != 0 ||
-      lsm6dso32_block_data_update_set(&imu, PROPERTY_ENABLE) != 0 ||
-      lsm6dso32_xl_full_scale_set(&imu, LSM6DSO32_16g) != 0 ||
-      lsm6dso32_gy_full_scale_set(&imu, LSM6DSO32_2000dps) != 0 ||
-      lsm6dso32_xl_data_rate_set(&imu, LSM6DSO32_XL_ODR_104Hz_HIGH_PERF) != 0 ||
-      lsm6dso32_gy_data_rate_set(&imu, LSM6DSO32_GY_ODR_104Hz_HIGH_PERF) != 0)
-    Error_Handler();
-}
+/* USER CODE END PFP */
 
-static void pack_u16(uint8_t *out, uint16_t value)
-{
-  out[0] = (uint8_t)value;
-  out[1] = (uint8_t)(value >> 8);
-}
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
 
-static void pack_sample(uint8_t out[8], uint16_t sequence, const int16_t axes[3])
-{
-  pack_u16(out, sequence);
-  for (unsigned i = 0; i < 3; ++i)
-    pack_u16(out + 2 + i * 2, (uint16_t)axes[i]);
-}
+/* USER CODE END 0 */
 
-/* Poll completion as in pcb-test-can. Clear completion flags explicitly so
- * TXOK from an earlier attempt cannot be mistaken for this transmission.
- * No CAN TX interrupts may be enabled alongside this polling implementation. */
-static int can_send(uint32_t id, const uint8_t data[8])
-{
-  CAN_TxHeaderTypeDef header = {0};
-  uint32_t mailbox;
-  header.StdId = id;
-  header.IDE = CAN_ID_STD;
-  header.RTR = CAN_RTR_DATA;
-  header.DLC = 8;
-  if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0 ||
-      HAL_CAN_AddTxMessage(&hcan1, &header, data, &mailbox) != HAL_OK)
-    return 0;
-
-  uint32_t start = HAL_GetTick();
-  while (HAL_CAN_IsTxMessagePending(&hcan1, mailbox)) {
-    if (HAL_GetTick() - start >= CAN_TX_TIMEOUT_MS) {
-      HAL_CAN_AbortTxRequest(&hcan1, mailbox);
-      can_last_esr = hcan1.Instance->ESR;
-      can_last_tsr = hcan1.Instance->TSR;
-      return 0;
-    }
-  }
-  uint32_t txok = (mailbox == CAN_TX_MAILBOX0) ? CAN_TSR_TXOK0 :
-                 (mailbox == CAN_TX_MAILBOX1) ? CAN_TSR_TXOK1 : CAN_TSR_TXOK2;
-  uint32_t complete = (mailbox == CAN_TX_MAILBOX0) ? CAN_TSR_RQCP0 :
-                     (mailbox == CAN_TX_MAILBOX1) ? CAN_TSR_RQCP1 : CAN_TSR_RQCP2;
-  can_last_tsr = hcan1.Instance->TSR;
-  can_last_esr = hcan1.Instance->ESR;
-  hcan1.Instance->TSR = complete;
-  return (can_last_tsr & txok) != 0;
-}
-
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
+
+  /* USER CODE BEGIN 1 */
+
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* Configure the system clock */
   SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN1_Init();
   MX_SPI3_Init();
-  imu_init();
-  if (HAL_CAN_Start(&hcan1) != HAL_OK) Error_Handler();
+  /* USER CODE BEGIN 2 */
 
-  uint16_t sequence = 0;
-  uint32_t last_sample = HAL_GetTick();
-  uint32_t last_blink = last_sample;
-  while (1) {
-    uint8_t accel_ready = 0, gyro_ready = 0;
-    if (lsm6dso32_xl_flag_data_ready_get(&imu, &accel_ready) != 0 ||
-        lsm6dso32_gy_flag_data_ready_get(&imu, &gyro_ready) != 0) {
-      ++imu_read_errors;
-      HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
-      HAL_Delay(1);
-      continue;
-    }
-    if (!accel_ready || !gyro_ready) {
-      if (HAL_GetTick() - last_sample >= IMU_STALE_TIMEOUT_MS)
-        HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
-      continue;
-    }
+  /* USER CODE END 2 */
 
-    int16_t accel[3], gyro[3];
-    if (lsm6dso32_acceleration_raw_get(&imu, accel) != 0 ||
-        lsm6dso32_angular_rate_raw_get(&imu, gyro) != 0) {
-      ++imu_read_errors;
-      HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
-      continue;
-    }
-    ++imu_samples;
-    last_sample = HAL_GetTick();
-    uint8_t accel_payload[8], gyro_payload[8];
-    pack_sample(accel_payload, sequence, accel);
-    pack_sample(gyro_payload, sequence, gyro);
-    ++sequence; /* Advance even on loss; receiver detects missing sample pairs. */
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+    /* USER CODE END WHILE */
 
-    if (can_send(IMU_ACCEL_CAN_ID, accel_payload) &&
-        can_send(IMU_GYRO_CAN_ID, gyro_payload)) {
-      ++can_pairs_sent;
-      if (HAL_GetTick() - last_blink >= 500U) {
-        last_blink = HAL_GetTick();
-        HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-      }
-    } else {
-      ++can_pairs_dropped;
-      HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
-    }
+    /* USER CODE BEGIN 3 */
   }
+  /* USER CODE END 3 */
 }
 
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -205,22 +159,37 @@ void SystemClock_Config(void)
   }
 }
 
+/* USER CODE BEGIN 4 */
 
+/* USER CODE END 4 */
 
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1) {
-    HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-    for (volatile uint32_t i = 0; i < 2000000U; ++i) { }
+  while (1)
+  {
   }
+  /* USER CODE END Error_Handler_Debug */
 }
-
 #ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
-  (void)file;
-  (void)line;
-  Error_Handler();
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
 }
-#endif
+#endif /* USE_FULL_ASSERT */
