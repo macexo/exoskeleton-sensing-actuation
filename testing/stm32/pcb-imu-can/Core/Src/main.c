@@ -24,6 +24,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "lsm6dso32_reg.h"
+#include "lsm6dso32_port.h"
 
 /* USER CODE END Includes */
 
@@ -34,6 +36,14 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define IMU_ACCEL_CAN_ID     0x065U   // Give each additional board its own pair of IDs
+#define IMU_GYRO_CAN_ID      0x066U
+#define CAN_TX_TIMEOUT_MS    3U       // An 8-byte frame at 1 Mbit/s takes ~0.13 ms
+#define IMU_BOOT_TIME_MS     35U      // Datasheet turn-on time
+#define IMU_RESET_TIMEOUT_MS 100U     // Ceiling on the software-reset flag poll
+#define IMU_STALE_TIMEOUT_MS 100U     // LED1 goes solid if no sample arrives for this long
+#define LED_BLINK_MS         500U     // LED1 toggle period while pairs are being ACKed
+#define ERROR_BLINK_LOOPS    2000000U // Busy-wait count per LED toggle in Error_Handler (roughly 0.1 s at 180 MHz)
 
 /* USER CODE END PD */
 
@@ -45,17 +55,224 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+/* Must outlive the ctx: lsm6dso32_spi_ctx() keeps a pointer to it. */
+static lsm6dso32_spi_bus_t imu_bus = { &hspi3, IMU_CS_GPIO_Port, IMU_CS_Pin };
+static stmdev_ctx_t imu;
+
+static uint16_t imu_sequence;
+static uint32_t last_sample_tick;
+static uint32_t last_blink_tick;
+
+/* Inspect these in the debugger. CAN ESR includes LEC, TEC, REC and bus-off. */
+volatile uint8_t  imu_whoami;
+volatile uint32_t imu_samples;
+volatile uint32_t imu_read_errors;
+volatile uint32_t can_pairs_sent;
+volatile uint32_t can_pairs_dropped;
+volatile uint32_t can_last_esr;
+volatile uint32_t can_last_tsr;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+static void imu_init(void);
+static void imu_stream(void);
+static void imu_pack_frame(uint8_t *out, uint16_t sequence, const int16_t *axes);
+static HAL_StatusTypeDef CAN_Send_Frame(uint32_t id, const uint8_t *data);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/**
+  * @brief  Brings the LSM6DSO32 up on SPI3: confirms the sensor is responsive,
+  *         restores a known register state, locks the bus to SPI, then sets
+  *         the output ranges and data rates.
+  * @retval None (traps in Error_Handler if any step fails)
+  */
+static void imu_init(void)
+{
+  uint8_t whoami = 0;
+  uint8_t rst = 1;
+
+  /* Constructor drives the chip select line idle-high */
+  imu = lsm6dso32_spi_ctx(&imu_bus);
+
+  /* Allow sensor turn-on time before the first transaction */
+  HAL_Delay(IMU_BOOT_TIME_MS);
+
+  /* Read imu_whoami in the debugger -- on a new board the value points at the
+     fault:
+       0x00        MISO stuck low: not connected, or sensor not driving it
+       0xFF        MISO floating high: CS not reaching the sensor, or no power
+       0xD8 / 0x36 0x6C shifted by a bit: stray clock edge, check CPOL/CPHA
+       other       wrong part, or a short on the bus */
+  int32_t id_status = lsm6dso32_device_id_get(&imu, &whoami);
+
+  imu_whoami = whoami;
+
+  if (id_status != 0 || whoami != LSM6DSO32_ID)
+    Error_Handler();
+
+  /* Software reset, then wait for sensor to clear the flag. Bounded so a bus
+     dropout here traps instead of hanging silently */
+  if (lsm6dso32_reset_set(&imu, PROPERTY_ENABLE) != 0)
+    Error_Handler();
+
+  uint32_t reset_start = HAL_GetTick();
+
+  do {
+    if (lsm6dso32_reset_get(&imu, &rst) != 0 ||
+        HAL_GetTick() - reset_start >= IMU_RESET_TIMEOUT_MS)
+      Error_Handler();
+  } while (rst);
+
+  /* Disable I2C and set the 4-wire mode for SPI. With block data update on,
+     output registers are not updated until both MSB and LSB have been read.
+     Scale factors in the README must match these ranges */
+  if (lsm6dso32_i2c_interface_set(&imu, LSM6DSO32_I2C_DISABLE) != 0 ||
+      lsm6dso32_spi_mode_set(&imu, LSM6DSO32_SPI_4_WIRE) != 0 ||
+      lsm6dso32_auto_increment_set(&imu, PROPERTY_ENABLE) != 0 ||
+      lsm6dso32_block_data_update_set(&imu, PROPERTY_ENABLE) != 0 ||
+      lsm6dso32_xl_full_scale_set(&imu, LSM6DSO32_16g) != 0 ||
+      lsm6dso32_gy_full_scale_set(&imu, LSM6DSO32_2000dps) != 0 ||
+      lsm6dso32_xl_data_rate_set(&imu, LSM6DSO32_XL_ODR_104Hz_HIGH_PERF) != 0 ||
+      lsm6dso32_gy_data_rate_set(&imu, LSM6DSO32_GY_ODR_104Hz_HIGH_PERF) != 0)
+    Error_Handler();
+}
+
+/**
+  * @brief  Polls the data-ready flags and sends one accel frame and one gyro
+  *         frame per new reading. Returns immediately when nothing fresh is
+  *         waiting, so the caller sets the pace, not this function.
+  *
+  *         LED1 toggles every LED_BLINK_MS while pairs are being ACKed. It is
+  *         solid on after a failed send or read, or if samples stop arriving.
+  * @retval None
+  */
+static void imu_stream(void)
+{
+  uint8_t xl_ready = 0;
+  uint8_t gy_ready = 0;
+  int16_t raw_xl[3];
+  int16_t raw_gy[3];
+  uint8_t xl_frame[8];
+  uint8_t gy_frame[8];
+
+  if (lsm6dso32_xl_flag_data_ready_get(&imu, &xl_ready) != 0 ||
+      lsm6dso32_gy_flag_data_ready_get(&imu, &gy_ready) != 0) {
+    imu_read_errors++;
+    HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+    return;
+  }
+
+  /* Both run at the same ODR, so wait until the pair is ready and send one
+     pair per sample */
+  if (!xl_ready || !gy_ready) {
+    if (HAL_GetTick() - last_sample_tick >= IMU_STALE_TIMEOUT_MS)
+      HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+    return;
+  }
+
+  /* Reading the output registers is what clears the data-ready flags and
+     releases the BDU hold for the next sample. Failed reads are never sent */
+  if (lsm6dso32_acceleration_raw_get(&imu, raw_xl) != 0 ||
+      lsm6dso32_angular_rate_raw_get(&imu, raw_gy) != 0) {
+    imu_read_errors++;
+    HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+    return;
+  }
+
+  imu_samples++;
+  last_sample_tick = HAL_GetTick();
+
+  imu_pack_frame(xl_frame, imu_sequence, raw_xl);
+  imu_pack_frame(gy_frame, imu_sequence, raw_gy);
+  imu_sequence++; // Advance even on loss so the receiver can count missing pairs
+
+  if (CAN_Send_Frame(IMU_ACCEL_CAN_ID, xl_frame) == HAL_OK &&
+      CAN_Send_Frame(IMU_GYRO_CAN_ID, gy_frame) == HAL_OK) {
+    can_pairs_sent++;
+
+    if (HAL_GetTick() - last_blink_tick >= LED_BLINK_MS) {
+      last_blink_tick = HAL_GetTick();
+      HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+    }
+  } else {
+    can_pairs_dropped++;
+    HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+  }
+}
+
+/**
+  * @brief  Packs one reading into a CAN payload, all fields little endian:
+  *           bytes 0..1  uint16 sequence
+  *           bytes 2..7  int16 X, Y, Z in raw sensor counts
+  * @retval None
+  */
+static void imu_pack_frame(uint8_t *out, uint16_t sequence, const int16_t *axes)
+{
+  out[0] = (uint8_t)sequence;
+  out[1] = (uint8_t)(sequence >> 8);
+
+  for (int i = 0; i < 3; i++) {
+    uint16_t axis = (uint16_t)axes[i];
+
+    out[2 + (2 * i)] = (uint8_t)axis;
+    out[3 + (2 * i)] = (uint8_t)(axis >> 8);
+  }
+}
+
+/**
+  * @brief  Sends one standard-ID, 8-byte frame and waits for the attempt to
+  *         finish. CAN TX interrupts must stay off alongside this polling.
+  * @retval HAL_OK only if another node ACKed the frame
+  */
+static HAL_StatusTypeDef CAN_Send_Frame(uint32_t id, const uint8_t *data)
+{
+  CAN_TxHeaderTypeDef TxHeader = {0};
+  uint32_t TxMailbox = 0;
+
+  TxHeader.StdId = id;
+  TxHeader.IDE   = CAN_ID_STD;
+  TxHeader.RTR   = CAN_RTR_DATA;
+  TxHeader.DLC   = 8;
+
+  // Queue CAN frame if there's a free mailbox
+  if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0 ||
+      HAL_CAN_AddTxMessage(&hcan1, &TxHeader, data, &TxMailbox) != HAL_OK)
+    return HAL_ERROR;
+
+  // Wait for the transmission attempt to finish
+  uint32_t start = HAL_GetTick();
+
+  while (HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox)) {
+    if (HAL_GetTick() - start >= CAN_TX_TIMEOUT_MS) {
+      HAL_CAN_AbortTxRequest(&hcan1, TxMailbox);
+      can_last_esr = hcan1.Instance->ESR;
+      can_last_tsr = hcan1.Instance->TSR;
+      return HAL_TIMEOUT;
+    }
+  }
+
+  // TXOK is only set if the frame went out and was ACKed by another node
+  uint32_t txok_bit = (TxMailbox == CAN_TX_MAILBOX0) ? CAN_TSR_TXOK0 :
+                      (TxMailbox == CAN_TX_MAILBOX1) ? CAN_TSR_TXOK1 : CAN_TSR_TXOK2;
+  uint32_t rqcp_bit = (TxMailbox == CAN_TX_MAILBOX0) ? CAN_TSR_RQCP0 :
+                      (TxMailbox == CAN_TX_MAILBOX1) ? CAN_TSR_RQCP1 : CAN_TSR_RQCP2;
+
+  can_last_esr = hcan1.Instance->ESR;
+  can_last_tsr = hcan1.Instance->TSR;
+
+  // Writing RQCP clears this mailbox's flags, so can_last_tsr only ever shows the latest attempt
+  hcan1.Instance->TSR = rqcp_bit;
+
+  return (can_last_tsr & txok_bit) ? HAL_OK : HAL_ERROR;
+}
+
 
 /* USER CODE END 0 */
 
@@ -91,6 +308,15 @@ int main(void)
   MX_CAN1_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
+  imu_init();
+
+  if (HAL_CAN_Start(&hcan1) != HAL_OK)
+    Error_Handler();
+
+  /* Start the stale-sample clock here: the gyro's turn-on time alone could
+     otherwise read as a stalled stream on the first pass */
+  last_sample_tick = HAL_GetTick();
+  last_blink_tick = last_sample_tick;
 
   /* USER CODE END 2 */
 
@@ -101,6 +327,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    imu_stream();
   }
   /* USER CODE END 3 */
 }
@@ -174,6 +401,10 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+    // Fast blink so startup errors are distinguishable from a solid "not sending" LED.
+    // Busy-wait because interrupts are off, so HAL_Delay() would hang.
+    HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+    for (volatile uint32_t i = 0; i < ERROR_BLINK_LOOPS; i++);
   }
   /* USER CODE END Error_Handler_Debug */
 }

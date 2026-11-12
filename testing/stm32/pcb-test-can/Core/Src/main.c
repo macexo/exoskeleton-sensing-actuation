@@ -34,7 +34,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define CAN_TX_INTERVAL_MS 250
-#define CAN_TX_TIMEOUT_MS  5     // An 8-byte frame at 500 kbit/s takes ~0.25 ms
+#define CAN_TX_TIMEOUT_MS  5     // An 8-byte frame at 1 Mbit/s takes ~0.13 ms
 #define ERROR_BLINK_LOOPS  2000000 // Busy-wait count per LED toggle in Error_Handler (roughly 0.1 s at 180 MHz)
 #define CAN_LOOPBACK_TEST  0     // 1 = controller ACKs its own frames (no bus needed), 0 = normal mode
 /* USER CODE END PD */

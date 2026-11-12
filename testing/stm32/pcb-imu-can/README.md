@@ -2,7 +2,7 @@
 
 Standalone STM32CubeIDE project based on `pcb-test-can`, adding the SPI IMU
 transport from `pcb-test-imu`. Streams LSM6DSO32 acceleration and gyro data to a
-Raspberry Pi 5 over classic CAN at **500 kbit/s**. This is a bench telemetry
+Raspberry Pi 5 over classic CAN at **1 Mbit/s**. This is a bench telemetry
 protocol; it does not implement the suit's existing joint-control protocol.
 
 ## Hardware and firmware
@@ -10,7 +10,7 @@ protocol; it does not implement the suit's existing joint-control protocol.
 | Function | Setting |
 | --- | --- |
 | MCU | STM32F446RET6, internal HSI + PLL, 180 MHz |
-| CAN1 | PA11 RX, PA12 TX; 500 kbit/s, normal mode |
+| CAN1 | PA11 RX, PA12 TX; 1 Mbit/s, normal mode |
 | SPI3 | PC10 SCK, PB4 MISO, PB5 MOSI; mode 3, 5.625 MHz |
 | IMU CS | PB6, software controlled, idle high |
 | LED1 | PC13, active high |
@@ -20,7 +20,7 @@ Use the SPI board revision matching these pins. Connect CAN_H, CAN_L and a
 common ground to the Pi's CAN interface, with 120 ohm termination at each end.
 The Pi needs a CAN controller/transceiver (HAT or USB adapter); do not connect
 CAN_H/CAN_L directly to Pi GPIO. Use the same hardware that acknowledged
-`pcb-test-can`, at the same 500 kbit/s rate and with listen-only disabled.
+`pcb-test-can`, at the same 1 Mbit/s rate and with listen-only disabled.
 
 ## Import, build and flash
 
@@ -80,7 +80,7 @@ while no other application relies on the interface:
 
 ```bash
 sudo ip link set can0 down
-sudo ip link set can0 type can bitrate 500000 listen-only off restart-ms 100
+sudo ip link set can0 type can bitrate 1000000 listen-only off restart-ms 100
 sudo ip link set can0 up
 ip -details -statistics link show can0
 ```
@@ -94,20 +94,21 @@ candump can0,065:7FF,066:7FF
 Copy `Scripts/imu_can.py` to the Pi and run it with Python 3 (no pip packages):
 
 ```bash
+python3 imu_can.py --list
 python3 imu_can.py --channel can0
-python3 imu_can.py --channel can0 > imu.csv
+python3 imu_can.py --channel can0 --out imu.csv
 ```
 
-Output columns are host monotonic receive time (not MCU sample time), sequence,
-ax/ay/az in g, gx/gy/gz in degrees/s, and cumulative missing sample pairs.
+Output columns are receive time in seconds since the script started (not MCU
+sample time), sequence, ax/ay/az in g, gx/gy/gz in degrees/s, and cumulative
+missing sample pairs. `--out` appends the same columns to a CSV file with 6
+decimal places, since the console's 3 would round away accel resolution.
 The missing counter handles normal sequence wrap; MCU resets cannot be reliably
 distinguished from packet loss without an additional boot identifier.
 Use `--accel-id` and `--gyro-id` if firmware IDs are changed.
 
 ## Source maintenance
 
-The `.ioc` records the combined CAN/SPI hardware settings; `Core/Src/main.c` is
-the application source. Back it up before CubeMX regeneration: the custom main
-is not maintained inside CubeMX USER CODE blocks. Build/flash through CubeIDE
-does not regenerate it. Existing `pcb-test-can` and `pcb-test-imu` projects are
-unchanged.
+The `.ioc` records the combined CAN/SPI hardware settings. The application code
+in `Core/Src/main.c` sits inside CubeMX `USER CODE` blocks, so regenerating from
+the `.ioc` keeps it; add new code inside those blocks too.
