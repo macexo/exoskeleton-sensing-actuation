@@ -78,28 +78,28 @@ Example sequence 42: acceleration (0, 0, 2049), gyro (-1, 0, 1):
 
 ## Receive on Raspberry Pi 5
 
-Assuming the Pi's CAN hardware/driver already exposes `can0`, configure its rate
+Assuming the Pi's CAN hardware/driver already exposes `can1`, configure its rate
 while no other application relies on the interface:
 
 ```bash
-sudo ip link set can0 down
-sudo ip link set can0 type can bitrate 1000000 listen-only off restart-ms 100
-sudo ip link set can0 up
-ip -details -statistics link show can0
+sudo ip link set can1 down
+sudo ip link set can1 type can bitrate 1000000 listen-only off restart-ms 100
+sudo ip link set can1 up
+ip -details -statistics link show can1
 ```
 
 Raw inspection, if `can-utils` is installed:
 
 ```bash
-candump can0,065:7FF,066:7FF
+candump can1,065:7FF,066:7FF
 ```
 
 Copy `Scripts/imu_can.py` to the Pi and run it with Python 3 (no pip packages):
 
 ```bash
 python3 imu_can.py --list
-python3 imu_can.py --channel can0
-python3 imu_can.py --channel can0 --out imu.csv
+python3 imu_can.py --channel can1
+python3 imu_can.py --channel can1 --out imu.csv
 ```
 
 Output columns are receive time in seconds since the script started (not MCU

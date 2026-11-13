@@ -87,7 +87,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--list", action="store_true", help="list CAN interfaces and exit")
-    parser.add_argument("-c", "--channel", default="can0", help="CAN interface, e.g. can0")
+    parser.add_argument("-c", "--channel", default="can1", help="CAN interface, e.g. can1")
     parser.add_argument("--accel-id", type=lambda s: int(s, 0), default=0x065,
                         help="must match IMU_ACCEL_CAN_ID in Core/Src/main.c")
     parser.add_argument("--gyro-id", type=lambda s: int(s, 0), default=0x066,
