@@ -16,8 +16,8 @@ lost so far.
 Rows are printed as they arrive, and optionally appended to a CSV file.
 
 Usage:
-    python3 imu_can.py --channel can0
-    python3 imu_can.py --channel can0 --out run.csv
+    python3 imu_can.py --channel can1
+    python3 imu_can.py --channel can1 --out run.csv
 """
 
 import argparse
