@@ -4,7 +4,7 @@ imu_can.py
 
 Reads the LSM6DSO32 stream off the CAN bus through Linux SocketCAN.
 
-The firmware sends a pair of 8-byte frames per sample at 104 Hz, little endian,
+The firmware sends a pair of 8-byte frames per sample at 417 Hz, little endian,
 with the axes as raw signed sensor counts:
     0x065: <uint16 sequence>,<int16 ax>,<int16 ay>,<int16 az>
     0x066: <uint16 sequence>,<int16 gx>,<int16 gy>,<int16 gz>

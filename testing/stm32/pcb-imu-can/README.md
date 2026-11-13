@@ -13,8 +13,10 @@ protocol; it does not implement the suit's existing joint-control protocol.
 | CAN1 | PA11 RX, PA12 TX; 1 Mbit/s, normal mode |
 | SPI3 | PC10 SCK, PB4 MISO, PB5 MOSI; mode 3, 5.625 MHz |
 | IMU CS | PB6, software controlled, idle high |
+| IMU INT1 | PB1, EXTI1 rising edge, pull-down; gyro data-ready, pulsed |
 | LED1 | PC13, active high |
-| IMU | LSM6DSO32, +/-16 g, +/-2000 dps, both 104 Hz, polling |
+| IMU | LSM6DSO32, +/-16 g, +/-2000 dps, both 417 Hz, interrupt driven |
+| IMU filters | accel LPF2 at ODR/20 (~21 Hz), gyro LPF1 AGGRESSIVE (24.6 Hz) |
 
 Use the SPI board revision matching these pins. Connect CAN_H, CAN_L and a
 common ground to the Pi's CAN interface, with 120 ohm termination at each end.
@@ -39,7 +41,7 @@ Reset and CAN waits are bounded. Failed reads are never transmitted. CAN uses
 single-attempt transmission (no automatic retransmission) and automatic bus-off
 recovery. Dropped samples are not queued for later replay.
 
-Debugger variables: `imu_whoami`, `imu_samples`, `imu_read_errors`,
+Debugger variables: `imu_whoami`, `imu_drdy_overruns`, `imu_samples`, `imu_read_errors`,
 `can_pairs_sent`, `can_pairs_dropped`, `can_last_esr`, `can_last_tsr`.
 The two CAN snapshots describe the most recent completed/aborted attempt.
 
@@ -60,9 +62,10 @@ without clipping gyro values into a 16-bit mdps field.
 
 Sequence starts at zero, wraps after 65535 and increments for every captured
 sample, even if CAN transmission fails. Pair only equal sequences; discard
-incomplete pairs. The paired readings are polled sequentially, not hardware
-timestamped. No MCU timestamp is transmitted. At 104 sample pairs/s the stream
-is 208 frames/s. Give each additional board its own pair of IDs by changing
+incomplete pairs. Each pair is read on the gyro data-ready interrupt; accel and
+gyro are read back to back, not hardware timestamped. No MCU timestamp is
+transmitted. At 417 sample pairs/s the stream is 834 frames/s (roughly 11% of
+a 1 Mbit/s bus). Give each additional board its own pair of IDs by changing
 `IMU_ACCEL_CAN_ID` / `IMU_GYRO_CAN_ID` in `Core/Src/main.c`; the default 0x065
 also overlaps the old fixed-payload CAN test, so stop that test on other nodes.
 

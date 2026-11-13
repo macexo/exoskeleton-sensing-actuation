@@ -63,8 +63,12 @@ static uint16_t imu_sequence;
 static uint32_t last_sample_tick;
 static uint32_t last_blink_tick;
 
+/* Set by the INT1 (gyro data-ready) EXTI callback, cleared by imu_stream() */
+static volatile uint8_t imu_drdy;
+
 /* Inspect these in the debugger. CAN ESR includes LEC, TEC, REC and bus-off. */
 volatile uint8_t  imu_whoami;
+volatile uint32_t imu_drdy_overruns; // INT1 fired again before the last sample was taken
 volatile uint32_t imu_samples;
 volatile uint32_t imu_read_errors;
 volatile uint32_t can_pairs_sent;
@@ -86,6 +90,21 @@ static HAL_StatusTypeDef CAN_Send_Frame(uint32_t id, const uint8_t *data);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/**
+  * @brief  Data-ready interrupt from the sensor's INT1 pin. Only raises a
+  *         flag: SPI and CAN work stays in the main loop.
+  * @param  GPIO_Pin  Pin whose EXTI line fired
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == IMU_INT1_Pin) {
+    if (imu_drdy)
+      imu_drdy_overruns++;
+    imu_drdy = 1;
+  }
+}
 
 /**
   * @brief  Brings the LSM6DSO32 up on SPI3: confirms the sensor is responsive,
@@ -139,15 +158,38 @@ static void imu_init(void)
       lsm6dso32_block_data_update_set(&imu, PROPERTY_ENABLE) != 0 ||
       lsm6dso32_xl_full_scale_set(&imu, LSM6DSO32_16g) != 0 ||
       lsm6dso32_gy_full_scale_set(&imu, LSM6DSO32_2000dps) != 0 ||
-      lsm6dso32_xl_data_rate_set(&imu, LSM6DSO32_XL_ODR_104Hz_HIGH_PERF) != 0 ||
-      lsm6dso32_gy_data_rate_set(&imu, LSM6DSO32_GY_ODR_104Hz_HIGH_PERF) != 0)
+      lsm6dso32_xl_data_rate_set(&imu, LSM6DSO32_XL_ODR_417Hz_HIGH_PERF) != 0 ||
+      lsm6dso32_gy_data_rate_set(&imu, LSM6DSO32_GY_ODR_417Hz_HIGH_PERF) != 0)
+    Error_Handler();
+
+  /* Low-pass the accelerometer with LPF2 (corner ODR/20, ~21 Hz at 417 Hz) and
+     the gyro with LPF1 (AGGRESSIVE is 24.6 Hz at 417 Hz, see the LPF1 table in
+     the datasheet). Both corners depend on the ODR, so revisit them if it
+     changes. Settling mask suppresses the filter transient after reset */
+  if (lsm6dso32_xl_filter_lp2_set(&imu, PROPERTY_ENABLE) != 0 ||
+      lsm6dso32_xl_hp_path_on_out_set(&imu, LSM6DSO32_LP_ODR_DIV_20) != 0 ||
+      lsm6dso32_gy_filter_lp1_set(&imu, PROPERTY_ENABLE) != 0 ||
+      lsm6dso32_gy_lp1_bandwidth_set(&imu, LSM6DSO32_AGGRESSIVE) != 0 ||
+      lsm6dso32_filter_settling_mask_set(&imu, PROPERTY_ENABLE) != 0)
+    Error_Handler();
+
+  /* Route only gyro data-ready to INT1 (routing drdy_xl too would give two
+     edges per sample, since the two paths are not bit-aligned). Pulsed rather
+     than latched, so a missed edge cannot leave the line stuck high */
+  lsm6dso32_pin_int1_route_t int1 = {0};
+
+  int1.int1_ctrl.int1_drdy_g = PROPERTY_ENABLE;
+
+  if (lsm6dso32_pin_int1_route_set(&imu, &int1) != 0 ||
+      lsm6dso32_data_ready_mode_set(&imu, LSM6DSO32_DRDY_PULSED) != 0)
     Error_Handler();
 }
 
 /**
-  * @brief  Polls the data-ready flags and sends one accel frame and one gyro
-  *         frame per new reading. Returns immediately when nothing fresh is
-  *         waiting, so the caller sets the pace, not this function.
+  * @brief  Sends one accel frame and one gyro frame per INT1 data-ready
+  *         interrupt. Returns immediately when the flag is clear, so the
+  *         sensor sets the pace and no SPI traffic happens until a sample
+  *         actually exists.
   *
   *         LED1 toggles every LED_BLINK_MS while pairs are being ACKed. It is
   *         solid on after a failed send or read, or if samples stop arriving.
@@ -155,27 +197,19 @@ static void imu_init(void)
   */
 static void imu_stream(void)
 {
-  uint8_t xl_ready = 0;
-  uint8_t gy_ready = 0;
   int16_t raw_xl[3];
   int16_t raw_gy[3];
   uint8_t xl_frame[8];
   uint8_t gy_frame[8];
 
-  if (lsm6dso32_xl_flag_data_ready_get(&imu, &xl_ready) != 0 ||
-      lsm6dso32_gy_flag_data_ready_get(&imu, &gy_ready) != 0) {
-    imu_read_errors++;
-    HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
-    return;
-  }
-
-  /* Both run at the same ODR, so wait until the pair is ready and send one
-     pair per sample */
-  if (!xl_ready || !gy_ready) {
+  /* No interrupt yet. SysTick still wakes the loop every 1 ms, so a dead
+     INT1 line or stalled sensor is caught here */
+  if (!imu_drdy) {
     if (HAL_GetTick() - last_sample_tick >= IMU_STALE_TIMEOUT_MS)
       HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
     return;
   }
+  imu_drdy = 0;
 
   /* Reading the output registers is what clears the data-ready flags and
      releases the BDU hold for the next sample. Failed reads are never sent */
@@ -327,6 +361,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    /* Sleep until the next interrupt (INT1 or SysTick). PRIMASK closes the
+       window where INT1 could fire between the check and the WFI: a pending
+       IRQ still wakes WFI with PRIMASK set, and runs once it is cleared */
+    __disable_irq();
+    if (!imu_drdy)
+      __WFI();
+    __enable_irq();
+
     imu_stream();
   }
   /* USER CODE END 3 */
