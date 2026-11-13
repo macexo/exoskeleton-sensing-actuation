@@ -3,7 +3,7 @@
 Embedded code for the sensing and actuation subsystem of the McMaster Exoskeleton.
 
 This subsystem is the loop that makes the exoskeleton move: it reads the IMUs on each
-joint, runs the control logic on an STM32, and commands the actuators over CAN.
+joint, runs the control logic on an STM32, and commands the actuators over CAN at 1 Mbit/s.
 
 > [!WARNING]
 > This code drives motors on a device a person wears. Read the
@@ -15,7 +15,7 @@ joint, runs the control logic on an STM32, and commands the actuators over CAN.
 | Role | Part | Interface | Notes |
 | --- | --- | --- | --- |
 | MCU | STM32 Nucleo-F446RE | — | Cortex-M4F @ 180 MHz |
-| Actuator | CubeMars AK70-9 KV60 | CAN (29-bit extended IDs) | Servo mode + MIT impedance control |
+| Actuator | CubeMars AK70-9 KV60 | CAN at 1 Mbit/s (29-bit extended IDs) | Servo mode + MIT impedance control |
 | IMU | LSM6DSO32 | SPI or I2C | 6-axis; ±32 g range |
 
 ## Repository Structure
