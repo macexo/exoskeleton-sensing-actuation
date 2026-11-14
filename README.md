@@ -14,7 +14,9 @@ joint, runs the control logic on an STM32, and commands the actuators over CAN a
 
 | Role | Part | Interface | Notes |
 | --- | --- | --- | --- |
-| MCU | STM32 Nucleo-F446RE | — | Cortex-M4F @ 180 MHz |
+| MCU (dev board) | STM32 Nucleo-F446RE | — | Cortex-M4F @ 180 MHz |
+| MCU (custom PCB) | STM32F446RET6 on the exo PCB | CAN1 (PA11 RX, PA12 TX); SPI3 to the IMU | 180 MHz from internal HSI + PLL; LED1 on PC13 for status. Bring-up projects are `testing/stm32/pcb-*` |
+| Host | Raspberry Pi 5 | CAN at 1 Mbit/s through a CAN HAT (`can1`) | Receives IMU telemetry from the PCB. |
 | Actuator | CubeMars AK70-9 KV60 | CAN at 1 Mbit/s (29-bit extended IDs) | Servo mode + MIT impedance control |
 | IMU | LSM6DSO32 | SPI or I2C | 6-axis; ±32 g range |
 
@@ -68,7 +70,11 @@ Full setup, prerequisites, and troubleshooting are in
 | `apis/imu` | LSM6DSO32 IMU API — STM32 HAL SPI and I2C ports over ST's platform-independent vendor driver | Complete |
 | `apis/motor` | AK70-9 motor API — servo-mode and MIT impedance control with feedback parsing over CAN bus | Complete |
 | `testing/stm32/imu-i2c` | LSM6DSO32 bring-up over I2C — `WHO_AM_I` check, 104 Hz ODR, polled data-ready, samples streamed over UART | Complete |
-| `testing/stm32/imu-spi` | LSM6DSO32 bring-up over SPI2 in 4-wire mode — same configuration and polled data-ready as the I2C project | In Progress |
+| `testing/stm32/imu-spi` | LSM6DSO32 bring-up over SPI2 in 4-wire mode — same configuration and polled data-ready as the I2C project | Complete |
+| `testing/stm32/pcb-test-led` | Custom STM32F446RE PCB smoke test — toggles LED1 (PC13) every 2 s to confirm the board boots and flashes | Complete |
+| `testing/stm32/pcb-test-can` | PCB CAN1 transmit test — sends a fixed frame (ID `0x065`) every 250 ms at 1 Mbit/s; LED1 shows whether frames are ACKed | Complete |
+| `testing/stm32/pcb-test-imu` | PCB LSM6DSO32 bring-up over SPI3 — `WHO_AM_I` check with fault hints, 104 Hz polled samples streamed as CSV over SWO | Complete |
+| `testing/stm32/pcb-imu-can` | PCB IMU-over-CAN telemetry — 417 Hz interrupt-driven accel/gyro pairs on IDs `0x065`/`0x066` at 1 Mbit/s, with a Raspberry Pi 5 receiver script (`imu_can.py`) for live view and CSV logging | Complete |
 
 Update a row the moment its code lands here, and add a row before you start a new project so nobody
 duplicates your work.
