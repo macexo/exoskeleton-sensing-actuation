@@ -75,6 +75,7 @@ Full setup, prerequisites, and troubleshooting are in
 | `testing/stm32/pcb-test-can` | PCB CAN1 transmit test — sends a fixed frame (ID `0x065`) every 250 ms at 1 Mbit/s; LED1 shows whether frames are ACKed | Complete |
 | `testing/stm32/pcb-test-imu` | PCB LSM6DSO32 bring-up over SPI3 — `WHO_AM_I` check with fault hints, 104 Hz polled samples streamed as CSV over SWO | Complete |
 | `testing/stm32/pcb-imu-can` | PCB IMU-over-CAN telemetry — 417 Hz interrupt-driven accel/gyro pairs on IDs `0x065`/`0x066` at 1 Mbit/s, with a Raspberry Pi 5 receiver script (`imu_can.py`) for live view and CSV logging | Complete |
+| `testing/stm32/pcb-imu-canbus` | Four PCBs on one CAN bus — same IMU stream as `pcb-imu-can`, per-board `NODE_ID` (IDs `0x190`–`0x1C0` / `0x210`–`0x240`, joint controller layout), auto retransmission; Pi script (`imu_canbus.py`) reports per-node rate and loss with a pass/fail result | In progress |
 
 Update a row the moment its code lands here, and add a row before you start a new project so nobody
 duplicates your work.
