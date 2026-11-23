@@ -150,7 +150,7 @@ void comm_can_set_duty(uint8_t controller_id, float duty);
  *
  * current: -60.0 to 60.0 amps
  */
-void comm_can_set_current(uint8_t controller_id, float current);
+int comm_can_set_current(uint8_t controller_id, float current);
 
 /*
  * Set the motor brake current.

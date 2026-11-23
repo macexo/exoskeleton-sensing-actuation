@@ -24,9 +24,9 @@ static float clampf(float val, float min_val, float max_val) {
  * Internal helper: transmit an extended-ID CAN frame
  * Builds the extended CAN ID from control mode and driver ID, then sends.
  * ========================================================================= */
-static void comm_can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len) {
+static int comm_can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len) {
     if (len > 8) len = 8;
-    can_send_ext(id, data, len);
+    return can_send_ext(id, data, len);
 }
 
 /* =========================================================================
@@ -61,11 +61,11 @@ void comm_can_set_duty(uint8_t controller_id, float duty) {
         buffer, (uint8_t)send_index);
 }
 
-void comm_can_set_current(uint8_t controller_id, float current) {
+int comm_can_set_current(uint8_t controller_id, float current) {
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_int32(buffer, (int32_t)(current * 1000.0f), &send_index);
-    comm_can_transmit_eid(
+    return comm_can_transmit_eid(
         controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT << 8),
         buffer, (uint8_t)send_index);
 }

@@ -25,6 +25,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "can_common.h"
+#include "can_motor.h"
+#include "can/ak70_9.h"
 #include "lsm6dso32_reg.h"
 #include "lsm6dso32_port.h"
 
@@ -51,6 +53,22 @@
 /* Same 11-bit layout as the joint controller's can_common.h:
      bits [10:7] message type, [6:4] source node, [3:0] destination (0 = Pi)
    Payload is this project's raw-count format, not the joint controller's */
+/* Zero reserves a telemetry-only build for boards without a motor assignment. */
+#ifndef JOINT_MOTOR_ID
+#if NODE_ID == CAN_NODE_RIGHT_KNEE
+#define JOINT_MOTOR_ID 107
+#else
+#define JOINT_MOTOR_ID 0
+#endif
+#endif
+#if JOINT_MOTOR_ID < 0 || JOINT_MOTOR_ID > 255
+#error "JOINT_MOTOR_ID must fit in one CAN address byte"
+#endif
+#define CURRENT_LIMIT_A       5.0f
+#define TORQUE_PER_AMP        (0.159f * 9.0f)
+#define CURRENT_REFRESH_MS    50U
+#define COMMAND_TIMEOUT_MS    200U
+
 #define IMU_ACCEL_CAN_ID     CAN_BUILD_ID(CAN_MSG_IMU_ACCEL, NODE_ID, CAN_NODE_PI)
 #define IMU_GYRO_CAN_ID      CAN_BUILD_ID(CAN_MSG_IMU_GYRO, NODE_ID, CAN_NODE_PI)
 
@@ -110,6 +128,63 @@ static HAL_StatusTypeDef CAN_Send_Frame(uint32_t id, const uint8_t *data);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+static float requested_current;
+static uint32_t last_command_tick;
+static uint32_t last_current_tick;
+static uint8_t current_due;
+static uint8_t estop_latched;
+static uint8_t reset_pending;
+
+static void stop_motor(void)
+{
+  /* Cancel queued nonzero commands, including a mailbox retrying on bus loss. */
+  HAL_CAN_AbortTxRequest(&hcan1, CAN_TX_MAILBOX0 | CAN_TX_MAILBOX1 | CAN_TX_MAILBOX2);
+  requested_current = 0;
+  current_due = 1;
+}
+
+static void motor_service(void)
+{
+  if (!JOINT_MOTOR_ID) return;
+  CanFrame frame;
+  uint32_t now = HAL_GetTick();
+  if (__HAL_CAN_GET_FLAG(&hcan1, CAN_FLAG_FOV0)) {
+    __HAL_CAN_CLEAR_FLAG(&hcan1, CAN_FLAG_FOV0);
+    estop_latched = 1;
+    stop_motor();
+  }
+  for (unsigned n = 0; n < 6 && can_recv(&frame); ++n) {
+    if (frame.is_extended) continue;
+    if (frame.id == CAN_ID_GLOBAL_RESET || can_get_msg_type(frame.id) == CAN_MSG_ESTOP) {
+      reset_pending |= frame.id == CAN_ID_GLOBAL_RESET;
+      estop_latched = 1;
+      stop_motor();
+    } else if (!estop_latched && frame.dlc == 2) {
+      float torque;
+      if (can_parse_torque_cmd(&frame, &torque)) {
+        if (torque == 0) {
+          stop_motor();
+        } else {
+          requested_current = torque / TORQUE_PER_AMP;
+          if (requested_current > CURRENT_LIMIT_A) requested_current = CURRENT_LIMIT_A;
+          if (requested_current < -CURRENT_LIMIT_A) requested_current = -CURRENT_LIMIT_A;
+          current_due = 1;
+        }
+        last_command_tick = now;
+      }
+    }
+  }
+  if (requested_current && now - last_command_tick >= COMMAND_TIMEOUT_MS) stop_motor();
+  if (current_due || (requested_current && now - last_current_tick >= CURRENT_REFRESH_MS)) {
+    if (comm_can_set_current(JOINT_MOTOR_ID, requested_current)) {
+      current_due = 0;
+      last_current_tick = now;
+    }
+  }
+  if (reset_pending && !current_due && HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 3)
+    NVIC_SystemReset();
+}
 
 /**
   * @brief  Data-ready interrupt from the sensor's INT1 pin. Only raises a
@@ -391,6 +466,8 @@ int main(void)
   if (!can_common_init(&hcan1, NODE_ID))
     Error_Handler();
 
+  if (JOINT_MOTOR_ID && !can_set_motor_filter(JOINT_MOTOR_ID)) Error_Handler();
+
   /* Start the stale-sample clock here: the gyro's turn-on time alone could
      otherwise read as a stalled stream on the first pass */
   last_sample_tick = HAL_GetTick();
@@ -413,6 +490,7 @@ int main(void)
       __WFI();
     __enable_irq();
 
+    motor_service();
     imu_stream();
   }
   /* USER CODE END 3 */
