@@ -1,10 +1,8 @@
-# pcb-imu-canbus
+# SPI joint controller
 
-Four-board version of `pcb-imu-can`. Up to four exo PCBs, one per joint, stream
-LSM6DSO32 acceleration and gyro data on **one shared CAN bus** at **1 Mbit/s** to a
-Raspberry Pi 5. The Pi script `Scripts/imu_canbus.py` pairs each board's frames,
-reports rate and sample loss per board, and prints a pass/fail result. This is a
-bench telemetry test; it does not implement the suit's joint-control protocol.
+STM32F446 joint firmware for the Sensing PCB. The LSM6DSO32 streams raw
+accelerometer and gyro pairs over CAN. A board assigned an AK70-9 also accepts
+manual torque commands and forwards motor feedback to the Pi.
 
 ## Hardware and firmware
 
@@ -28,9 +26,11 @@ bench telemetry test; it does not implement the suit's joint-control protocol.
 | 3 | left knee | `CAN_NODE_LEFT_KNEE` | `0x1B0` | `0x230` |
 | 4 | right knee | `CAN_NODE_RIGHT_KNEE` | `0x1C0` | `0x240` |
 
-The constants are defined in `Core/Src/main.c` with the same values as the joint
-controller's `can_common.h`. Set `NODE_ID` to one of them (the default is
-`CAN_NODE_LEFT_HIP`); a plain number 1..4 also works.
+Set the CubeIDE C preprocessor symbol `NODE_ID` per board. The default is
+`CAN_NODE_RIGHT_HIP` (2). Confirm the physical motor address before flashing.
+Right knee (4) defaults to motor 107, the pairing in the source controller.
+Other joints default to IMU-only. Define `JOINT_MOTOR_ID` to enable an assigned
+motor, or set it to 0 to build any board for IMU-only testing.
 
 IDs are `type << 7 | node << 4 | dest`, the layout in the joint controller's
 `can_common.h` (type 3 = IMU accel, 4 = IMU gyro, dest 0 = Pi). Only the IDs are
@@ -152,3 +152,51 @@ and that node's cumulative missing pairs. The CSV uses 6 decimal places.
 2. Connect one board at a time. Confirm its ID pair shows up in `candump` before
    adding the next.
 3. With all four up, run `imu_canbus.py --duration 300 --out run.csv`.
+
+## Joint-controller port
+
+The source was `macexo/exoskeleton-embedded` at `6a25ef9`, under
+`src/stm32/joint-controller/Core`. The first port commit imports
+`can_common`, `can_motor`, and `can/ak70_9` headers and sources.
+The controller loop ports torque-to-current conversion, periodic refresh,
+latched e-stop, global reset, and temporary encoder zeroing on first feedback.
+The application polls filtered CAN FIFOs with commands first and checks
+whether the current and origin commands could be queued.
+
+The board setup, SPI3 driver, interrupt-driven sampling, sequenced IMU
+payloads, and LED patterns come from `pcb-imu-canbus`. The older controller
+used I²C/DMA, embedded position in the gyro frame, and printed diagnostics
+over UART. This project reports motor information on a dedicated CAN frame.
+
+### Manual Pi contract
+
+| Message | Identifier and payload |
+| --- | --- |
+| Torque | Standard `0x080 + NODE_ID`, DLC 2. Signed little-endian millinewton-metres. |
+| E-stop | Standard type 0 broadcast (Pi ID `0x000`). Latches zero current until reset. |
+| Global reset | Standard `0x067`. Motor-enabled boards request zero current and wait for their transmit mailboxes to drain before resetting. |
+| Motor feedback | Extended `0x900 + JOINT_MOTOR_ID`, DLC 8. Queues temporary origin on first matching frame. |
+| Motor status | Standard `0x100 + (NODE_ID << 4)`, DLC 8. Three signed little-endian int16 fields (0.1° position, 10 ERPM speed, 0.01 A current), signed °C in byte 6, fault code in byte 7. |
+
+Current is torque divided by 1.431 Nm/A, limited to ±5 A. The STM32 refreshes
+current every 50 ms. The Pi must repeat active torque commands, for example
+every 50 ms. After 200 ms without a new command the STM32 requests zero.
+A one-shot manual command therefore expires. E-stop and command FIFO overflow
+latch the stop. Configure and verify the motor driver's own CAN timeout on
+the bench because a disconnected bus cannot deliver a zero-current command.
+
+Status is forwarded only on fresh matching feedback, up to 20 Hz during
+steady operation. Fault-code changes bypass the rate limit. The IMU capture
+script above decodes the raw IMU pairs. Use the Embedded Pi
+`can_motor.parse_motor_status` decoder for the separate status frames.
+
+### Motor bench verification (pending)
+
+First use a CAN monitor with motor power disconnected. Check the assigned
+address, current clamp, zero on command expiry, latched e-stop, and rejection
+of torque after e-stop. Inject a matching status frame and a wrong-address
+frame. Only the matching frame should produce telemetry. For right knee,
+extended `0x96B` carrying `FF FB 00 02 FF 9C 28 01` should yield standard
+`0x140` carrying `FB FF 02 00 9C FF 28 01` (−0.5°, 20 ERPM, −1 A, 40 °C,
+fault 1). Then follow the repository's unloaded two-person bench procedure
+and capture IMU rate and loss with motor traffic present.
