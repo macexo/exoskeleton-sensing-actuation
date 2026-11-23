@@ -155,18 +155,50 @@ and that node's cumulative missing pairs. The CSV uses 6 decimal places.
 
 ## Joint-controller port
 
-The source was `macexo/exoskeleton-embedded` at `6a25ef9`, under
-`src/stm32/joint-controller/Core`. The first port commit imports
-`can_common`, `can_motor`, and `can/ak70_9` headers and sources.
-The controller loop ports torque-to-current conversion, periodic refresh,
-latched e-stop, global reset, and temporary encoder zeroing on first feedback.
-The application polls filtered CAN FIFOs with commands first and checks
-whether the current and origin commands could be queued.
+The new project combines Sensing & Actuation's `testing/stm32/pcb-imu-canbus`
+with Embedded's `src/stm32/joint-controller` (commit `6a25ef9`).
 
-The board setup, SPI3 driver, interrupt-driven sampling, sequenced IMU
-payloads, and LED patterns come from `pcb-imu-canbus`. The older controller
-used I²C/DMA, embedded position in the gyro frame, and printed diagnostics
-over UART. This project reports motor information on a dedicated CAN frame.
+### Ported behavior shared with the source projects
+
+- **From pcb-imu-canbus:** STM32F446 pin assignments, 1 Mbit/s CAN1, LSM6DSO32
+  setup on SPI3, and gyro data-ready sampling on PB1 at 417 Hz.
+- **From pcb-imu-canbus:** Paired raw accelerometer and gyro frames with a
+  shared sequence number, per-node CAN IDs, and the Pi IMU capture script.
+- **From pcb-imu-canbus:** PC13 LED startup node count, heartbeat on ACKed
+  sample pairs, solid indication on failed or stale samples, and fast error blink.
+- **From joint-controller:** Pi torque frame layout, AK70-9 current command
+  encoding, torque conversion, ±5 A current clamp, and 50 ms current refresh.
+- **From joint-controller:** Latched e-stop, global reset command, and
+  temporary encoder zeroing on first motor feedback.
+
+### Changed during integration
+
+- Adapted the imported `can_common` transport to poll the two hardware FIFOs.
+  Commands take priority over feedback. The SPI IMU keeps its ACK-checked transmit path.
+- Tightened receive filters to match Pi torque commands for the configured node
+  and extended status frames from the assigned motor. Current and origin calls
+  now report whether the transmit mailbox accepted the request.
+- Made the motor address configurable per build. The known right-knee pairing
+  is node 4 / motor 107. Other nodes default to IMU-only until assigned a motor.
+- On global reset, a motor-enabled node queues zero current and waits for the
+  transmit mailboxes to drain before restarting.
+
+### Added in this project
+
+- A 200 ms Pi command timeout requests zero current. A command FIFO overrun
+  latches a stop because the board may have missed a command.
+- A dedicated motor-status transmission forwards position, speed, current,
+  driver temperature, and fault code using the existing Embedded Pi wire format.
+  Steady feedback is limited to 20 Hz. Fault changes bypass that limit.
+
+### Legacy joint-controller paths omitted from the port
+
+- The LSM6DS3TR I²C3/DMA driver, startup calibration, and periodic IMU read loop.
+  The PCB project supplies its own SPI acquisition and filter configuration.
+- Scaled IMU axes and motor position packed into the gyro frame. Motor position
+  now travels in the status frame, leaving room for the PCB's full raw gyro sample.
+- USART2 startup messages and the one-second motor diagnostic printout. The Pi
+  receives motor diagnostics over CAN.
 
 ### Manual Pi contract
 
