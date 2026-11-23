@@ -185,7 +185,7 @@ void comm_can_set_pos(uint8_t controller_id, float pos);
  * set_origin_mode: 0 = temporary origin (lost on power cycle)
  *                  1 = permanent origin (saved to flash)
  */
-void comm_can_set_origin(uint8_t controller_id, uint8_t set_origin_mode);
+int comm_can_set_origin(uint8_t controller_id, uint8_t set_origin_mode);
 
 /*
  * Set motor position with velocity and acceleration limits.

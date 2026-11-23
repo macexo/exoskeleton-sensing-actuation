@@ -144,6 +144,29 @@ static void stop_motor(void)
   current_due = 1;
 }
 
+/* Feedback and MOTOR_STATUS use the same fixed-point scales with opposite
+   byte order. Forward the integer samples exactly, including fault codes. */
+static void motor_feedback(const CanFrame *frame, uint32_t now)
+{
+  static uint8_t origin_set;
+  static uint8_t status_sent;
+  static uint8_t last_error;
+  static uint32_t last_status_tick;
+  if (frame->id != (0x900U | JOINT_MOTOR_ID) || frame->dlc != 8) return;
+  if (!origin_set)
+    origin_set = comm_can_set_origin(JOINT_MOTOR_ID, 0);
+  if (status_sent && now - last_status_tick < 50U && last_error == frame->data[7]) return;
+  uint8_t status[8] = {
+    frame->data[1], frame->data[0], frame->data[3], frame->data[2],
+    frame->data[5], frame->data[4], frame->data[6], frame->data[7]
+  };
+  if (can_send_std(CAN_BUILD_ID(CAN_MSG_MOTOR_STATUS, NODE_ID, CAN_NODE_PI), status, 8)) {
+    status_sent = 1;
+    last_error = status[7];
+    last_status_tick = now;
+  }
+}
+
 static void motor_service(void)
 {
   if (!JOINT_MOTOR_ID) return;
@@ -155,7 +178,10 @@ static void motor_service(void)
     stop_motor();
   }
   for (unsigned n = 0; n < 6 && can_recv(&frame); ++n) {
-    if (frame.is_extended) continue;
+    if (frame.is_extended) {
+      if (!reset_pending) motor_feedback(&frame, now);
+      continue;
+    }
     if (frame.id == CAN_ID_GLOBAL_RESET || can_get_msg_type(frame.id) == CAN_MSG_ESTOP) {
       reset_pending |= frame.id == CAN_ID_GLOBAL_RESET;
       estop_latched = 1;
@@ -491,7 +517,7 @@ int main(void)
     __enable_irq();
 
     motor_service();
-    imu_stream();
+    if (!reset_pending) imu_stream();
   }
   /* USER CODE END 3 */
 }

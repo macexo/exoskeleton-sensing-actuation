@@ -97,10 +97,10 @@ void comm_can_set_pos(uint8_t controller_id, float pos) {
         buffer, (uint8_t)send_index);
 }
 
-void comm_can_set_origin(uint8_t controller_id, uint8_t set_origin_mode) {
+int comm_can_set_origin(uint8_t controller_id, uint8_t set_origin_mode) {
     uint8_t buffer[1];
     buffer[0] = set_origin_mode;
-    comm_can_transmit_eid(
+    return comm_can_transmit_eid(
         controller_id | ((uint32_t)CAN_PACKET_SET_ORIGIN_HERE << 8),
         buffer, 1);
 }
