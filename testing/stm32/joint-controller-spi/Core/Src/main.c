@@ -152,7 +152,7 @@ static void motor_feedback(const CanFrame *frame, uint32_t now)
   static uint8_t status_sent;
   static uint8_t last_error;
   static uint32_t last_status_tick;
-  if (frame->id != (0x900U | JOINT_MOTOR_ID) || frame->dlc != 8) return;
+  if (frame->id != ak70_9_feedback_id(JOINT_MOTOR_ID) || frame->dlc != 8) return;
   if (!origin_set)
     origin_set = comm_can_set_origin(JOINT_MOTOR_ID, 0);
   if (status_sent && now - last_status_tick < 50U && last_error == frame->data[7]) return;

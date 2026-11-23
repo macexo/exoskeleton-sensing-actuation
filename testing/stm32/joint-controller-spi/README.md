@@ -207,7 +207,7 @@ with Embedded's `src/stm32/joint-controller` (commit `6a25ef9`).
 | Torque | Standard `0x080 + NODE_ID`, DLC 2. Signed little-endian millinewton-metres. |
 | E-stop | Standard type 0 broadcast (Pi ID `0x000`). Latches zero current until reset. |
 | Global reset | Standard `0x067`. Motor-enabled boards request zero current and wait for their transmit mailboxes to drain before resetting. |
-| Motor feedback | Extended `0x900 + JOINT_MOTOR_ID`, DLC 8. Queues temporary origin on first matching frame. |
+| Motor feedback | Extended `0x2900 + JOINT_MOTOR_ID`, DLC 8. Queues temporary origin on first matching frame. |
 | Motor status | Standard `0x100 + (NODE_ID << 4)`, DLC 8. Three signed little-endian int16 fields (0.1° position, 10 ERPM speed, 0.01 A current), signed °C in byte 6, fault code in byte 7. |
 
 Current is torque divided by 1.431 Nm/A, limited to ±5 A. The STM32 refreshes
@@ -228,7 +228,7 @@ First use a CAN monitor with motor power disconnected. Check the assigned
 address, current clamp, zero on command expiry, latched e-stop, and rejection
 of torque after e-stop. Inject a matching status frame and a wrong-address
 frame. Only the matching frame should produce telemetry. For right knee,
-extended `0x96B` carrying `FF FB 00 02 FF 9C 28 01` should yield standard
+extended `0x296B` carrying `FF FB 00 02 FF 9C 28 01` should yield standard
 `0x140` carrying `FB FF 02 00 9C FF 28 01` (−0.5°, 20 ERPM, −1 A, 40 °C,
 fault 1). Then follow the repository's unloaded two-person bench procedure
 and capture IMU rate and loss with motor traffic present.

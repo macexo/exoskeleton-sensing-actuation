@@ -29,6 +29,12 @@
 
 #include <stdint.h>
 
+/* CubeMars V3 Drive Software User Manual, section 2.3.1: servo feedback. */
+static inline uint32_t ak70_9_feedback_id(uint8_t motor_id)
+{
+    return (0x29U << 8) | motor_id;
+}
+
 /* ======================== Motor Configuration ============================= */
 
 #define MOTOR_CAN_ID               104       /* CAN ID of the AK70-9 motor */

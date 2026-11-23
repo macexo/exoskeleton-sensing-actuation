@@ -7,6 +7,7 @@
  */
 
 #include "can_common.h"
+#include "can/ak70_9.h"
 #include <string.h>
 
 /* ── Internal State ── */
@@ -119,14 +120,15 @@ uint8_t can_get_my_node_id(void) {
 int can_set_motor_filter(uint8_t motor_id) {
     if (!g_hcan) return 0;
 
-    /* AK70-9 periodic feedback uses packet type 9. Match all ID bits. */
+    /* bxCAN places the extended ID in bits 31:3 and IDE in bit 2. */
+    uint32_t filter_word = (ak70_9_feedback_id(motor_id) << 3) | CAN_ID_EXT;
     CAN_FilterTypeDef f;
     memset(&f, 0, sizeof(f));
     f.FilterBank           = 2;
     f.FilterMode           = CAN_FILTERMODE_IDMASK;
     f.FilterScale          = CAN_FILTERSCALE_32BIT;
-    f.FilterIdHigh         = 0;
-    f.FilterIdLow          = ((0x900U | motor_id) << 3) | 0x0004;
+    f.FilterIdHigh         = filter_word >> 16;
+    f.FilterIdLow          = filter_word & 0xFFFFU;
     f.FilterMaskIdHigh     = 0xFFFF;
     f.FilterMaskIdLow      = 0xFFFE;
     f.FilterFIFOAssignment = CAN_FILTER_FIFO1;
