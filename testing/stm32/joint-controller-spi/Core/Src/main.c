@@ -24,6 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "can_common.h"
 #include "lsm6dso32_reg.h"
 #include "lsm6dso32_port.h"
 
@@ -36,14 +37,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Joint node numbers on the exoskeleton, same values as the joint controller's
-   can_common.h. The Pi is node 0 */
-#define CAN_NODE_PI          0x0U
-#define CAN_NODE_LEFT_HIP    0x1U     // accel 0x190, gyro 0x210
-#define CAN_NODE_RIGHT_HIP   0x2U     // accel 0x1A0, gyro 0x220
-#define CAN_NODE_LEFT_KNEE   0x3U     // accel 0x1B0, gyro 0x230
-#define CAN_NODE_RIGHT_KNEE  0x4U     // accel 0x1C0, gyro 0x240
-
 /* Which joint this board is. Set it here, or per board with a preprocessor
    symbol such as NODE_ID=CAN_NODE_RIGHT_HIP (one CubeIDE build configuration
    per board). A plain number 1..4 also works */
@@ -58,9 +51,6 @@
 /* Same 11-bit layout as the joint controller's can_common.h:
      bits [10:7] message type, [6:4] source node, [3:0] destination (0 = Pi)
    Payload is this project's raw-count format, not the joint controller's */
-#define CAN_MSG_IMU_ACCEL    0x3U
-#define CAN_MSG_IMU_GYRO     0x4U
-#define CAN_BUILD_ID(type, src, dest) (((type) << 7) | ((src) << 4) | (dest))
 #define IMU_ACCEL_CAN_ID     CAN_BUILD_ID(CAN_MSG_IMU_ACCEL, NODE_ID, CAN_NODE_PI)
 #define IMU_GYRO_CAN_ID      CAN_BUILD_ID(CAN_MSG_IMU_GYRO, NODE_ID, CAN_NODE_PI)
 
@@ -398,7 +388,7 @@ int main(void)
   node_id_blink();
   imu_init();
 
-  if (HAL_CAN_Start(&hcan1) != HAL_OK)
+  if (!can_common_init(&hcan1, NODE_ID))
     Error_Handler();
 
   /* Start the stale-sample clock here: the gyro's turn-on time alone could

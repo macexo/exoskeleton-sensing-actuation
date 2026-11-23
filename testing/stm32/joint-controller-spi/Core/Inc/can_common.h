@@ -61,14 +61,6 @@ typedef struct {
     uint8_t  data[8];
 } CanFrame;
 
-/* ── Ring Buffer (RX) ── */
-#define CAN_RX_BUFFER_CAPACITY 32
-
-typedef struct {
-    CanFrame buf[CAN_RX_BUFFER_CAPACITY];
-    volatile uint16_t head, tail, count;
-} CanRxRingBuffer;
-
 /* ── Transport Functions ── */
 
 /*
@@ -78,7 +70,7 @@ typedef struct {
  * Filter setup:
  *   Bank 0 (FIFO0): Accept all ESTOP messages
  *   Bank 1 (FIFO0): Accept TORQUE_CMD addressed to my_node_id
- *   Bank 2 (FIFO1): Accept all extended frames (VESC motor feedback)
+ *   Configure motor feedback separately with can_set_motor_filter().
  *
  * Returns 1 on success, 0 on failure.
  */
@@ -98,7 +90,7 @@ int can_send_std(uint16_t std_id, const uint8_t *data, uint8_t dlc);
 int can_send_ext(uint32_t ext_id, const uint8_t *data, uint8_t dlc);
 
 /*
- * Pop the next received CAN frame from the internal ring buffer.
+ * Pop the next received CAN frame from hardware, giving command FIFO0 priority.
  * Returns 1 if a frame was retrieved, 0 if the buffer is empty.
  */
 int can_recv(CanFrame *out);
@@ -109,7 +101,7 @@ int can_recv(CanFrame *out);
 uint8_t can_get_my_node_id(void);
 
 /*
- * Reconfigure Filter 2 (FIFO1) to accept only extended frames whose low
+ * Reconfigure Filter 2 (FIFO1) to accept periodic feedback frames whose low
  * 8 bits match motor_id. Call this after can_common_init() to avoid
  * receiving feedback from other motors on a shared bus.
  *
