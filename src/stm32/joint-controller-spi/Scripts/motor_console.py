@@ -178,7 +178,8 @@ class SocketCAN:
             raise OSError("SocketCAN requires Linux; tests can run on other operating systems")
         self.sock = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
         try:
-            standard_mask = CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG | CAN_SFF_MASK
+            # CAN_ERR_FLAG in a filter mask selects Linux error-only reception.
+            standard_mask = CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_SFF_MASK
             standard_ids = [identifier for joint in JOINTS for identifier in imu_canbus.imu_ids(joint)]
             standard_ids.append(0)
             if feedback_source == "forwarded":
@@ -187,7 +188,7 @@ class SocketCAN:
                 raise ValueError("feedback source must be forwarded or direct")
             filters = [(identifier, standard_mask) for identifier in standard_ids]
             if feedback_source == "direct":
-                mask = CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG | CAN_EFF_MASK
+                mask = CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_EFF_MASK
                 filters.extend((CAN_EFF_FLAG | (FEEDBACK_FUNCTION << 8) | driver, mask)
                                for driver in motor_map.values())
             self.sock.setsockopt(socket.SOL_CAN_RAW, socket.CAN_RAW_FILTER,
