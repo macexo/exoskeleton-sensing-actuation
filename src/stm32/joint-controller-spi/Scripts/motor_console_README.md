@@ -46,8 +46,8 @@ in this project. Matches Majock's sensing-actuation PR #4 at
   big-endian. Latest firmware uses `0x29`, replacing the older PR's `0x09`.
 - Torque requests are standard `081`–`084`; ESTOP is `000`, one reason byte.
 
-Only node 4 → motor 107 is assigned by default. Nodes without `JOINT_MOTOR_ID`
-are IMU-only. The optional `--motor-map` only labels feedback; it does not configure
+Each board's motor is set by `BOARD_JOINT_MOTOR_ID` in the firmware's `main.c`
+(pairing: node 1 → 104, 2 → 105, 3 → 106, 4 → 107). Boards built with it at 0 are IMU-only. The optional `--motor-map` only labels feedback; it does not configure
 or enable motors. Verify physical assignments before using all-joint commands.
 
 The CSV contains command events, raw IDs/payloads, IMU sequences/axes, motor

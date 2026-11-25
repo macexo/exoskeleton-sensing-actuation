@@ -75,6 +75,7 @@ Full setup, prerequisites, and troubleshooting are in
 | `testing/stm32/pcb-test-imu` | PCB LSM6DSO32 bring-up over SPI3 — `WHO_AM_I` check with fault hints, 104 Hz polled samples streamed as CSV over SWO | Complete |
 | `testing/stm32/pcb-imu-can` | PCB IMU-over-CAN telemetry — 417 Hz interrupt-driven accel/gyro pairs on IDs `0x065`/`0x066` at 1 Mbit/s, with a Raspberry Pi 5 receiver script (`imu_can.py`) for live view and CSV logging | Complete |
 | `testing/stm32/pcb-imu-canbus` | Four PCBs on one CAN bus — same IMU stream as `pcb-imu-can`, per-board `NODE_ID` (IDs `0x190`–`0x1C0` / `0x210`–`0x240`, joint controller layout), auto retransmission; Pi script (`imu_canbus.py`) reports per-node rate and loss with a pass/fail result | In progress |
+| `src/stm32/joint-controller-spi` | SPI joint controller — `pcb-imu-canbus` IMU stream plus exoskeleton-embedded's joint-controller torque path: per-board `BOARD_NODE_ID` / `BOARD_JOINT_MOTOR_ID` (nodes 1–4 → motors 104–107, 0 = IMU only), ±5 A clamp, 200 ms command timeout, latched ESTOP and global reset (`0x067`), 20 Hz motor status on `0x110`–`0x140`; Pi console `motor_console.py` plus `imu_canbus.py`, with a step-by-step terminal test procedure in its README | In progress |
 
 Update a row the moment its code lands here, and add a row before you start a new project so nobody
 duplicates your work.

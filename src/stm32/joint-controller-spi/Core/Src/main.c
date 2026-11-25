@@ -39,11 +39,33 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Which joint this board is. Set it here, or per board with a preprocessor
-   symbol such as NODE_ID=CAN_NODE_RIGHT_HIP (one CubeIDE build configuration
-   per board). A plain number 1..4 also works */
+
+/* ============================================================================
+ *  PER-BOARD SETTINGS: change the two values below before flashing each board
+ * ============================================================================
+ *
+ *   BOARD_NODE_ID         Which joint this board is. Unique on the bus.
+ *                           1 = left hip    2 = right hip
+ *                           3 = left knee   4 = right knee
+ *                         LED1 flashes this many times after reset.
+ *
+ *   BOARD_JOINT_MOTOR_ID  CAN ID set on THIS board's AK70-9 with the CubeMars
+ *                         tool (1..255), or 0 for an IMU-only board with no
+ *                         motor. Unique on the bus. Node -> motor pairing:
+ *                           node 1 (left hip)    -> motor 104
+ *                           node 2 (right hip)   -> motor 105
+ *                           node 3 (left knee)   -> motor 106
+ *                           node 4 (right knee)  -> motor 107
+ *
+ *  A NODE_ID / JOINT_MOTOR_ID preprocessor symbol in the build configuration
+ *  (Project -> Properties -> MCU GCC Compiler -> Preprocessor) overrides these.
+ */
+#define BOARD_NODE_ID          2U    /* <-- EDIT 1 of 2: joint node ID (1..4)            */
+#define BOARD_JOINT_MOTOR_ID   105     /* <-- EDIT 2 of 2: motor CAN ID (104..107 above), 0 = none */
+/* ========================================================================== */
+
 #ifndef NODE_ID
-#define NODE_ID              CAN_NODE_RIGHT_HIP
+#define NODE_ID              BOARD_NODE_ID
 #endif
 
 #if (NODE_ID < CAN_NODE_LEFT_HIP) || (NODE_ID > CAN_NODE_RIGHT_KNEE)
@@ -55,11 +77,7 @@
    Payload is this project's raw-count format, not the joint controller's */
 /* Zero reserves a telemetry-only build for boards without a motor assignment. */
 #ifndef JOINT_MOTOR_ID
-#if NODE_ID == CAN_NODE_RIGHT_KNEE
-#define JOINT_MOTOR_ID 107
-#else
-#define JOINT_MOTOR_ID 0
-#endif
+#define JOINT_MOTOR_ID       BOARD_JOINT_MOTOR_ID
 #endif
 #if JOINT_MOTOR_ID < 0 || JOINT_MOTOR_ID > 255
 #error "JOINT_MOTOR_ID must fit in one CAN address byte"
